@@ -140,6 +140,7 @@ pub async fn ensure_playable(app: AppHandle, path: String) -> Result<PlayableSou
         "-c:a".into(), "aac".into(),
         "-b:a".into(), "128k".into(),
         "-movflags".into(), "+faststart".into(),
+        "-f".into(), "mp4".into(),
         tmp_path.to_string_lossy().to_string(),
     ];
 
