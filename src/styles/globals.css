@@ -676,6 +676,12 @@ input { font-family: inherit; }
 .btn-primary:active { transform: translateY(1px); }
 
 /* Empty state */
+.launch-loading {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
 .empty-state {
   flex: 1;
   display: flex;

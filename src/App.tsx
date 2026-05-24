@@ -16,6 +16,8 @@ export default function App() {
   const [src, setSrc] = useState<string | null>(null);
   const [thumbnails, setThumbnails] = useState<string[]>([]);
   const [trim, setTrim] = useState<TrimRange>({ startSec: 0, endSec: 0 });
+  const [checkingLaunchFile, setCheckingLaunchFile] = useState(true);
+  const [loadingLaunchFile, setLoadingLaunchFile] = useState(false);
 
   const [trimOpen, setTrimOpen] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
@@ -82,11 +84,26 @@ export default function App() {
 
   useEffect(() => {
     let cancelled = false;
-    getLaunchFile()
-      .then((path) => {
-        if (!cancelled && path) void loadVideo(path);
-      })
-      .catch(() => {});
+    const loadLaunchFile = async () => {
+      try {
+        const path = await getLaunchFile();
+        if (cancelled) return;
+
+        if (path) {
+          setLoadingLaunchFile(true);
+          await loadVideo(path);
+        }
+      } catch {
+        // Launch-file detection should never block the normal empty state.
+      } finally {
+        if (!cancelled) {
+          setLoadingLaunchFile(false);
+          setCheckingLaunchFile(false);
+        }
+      }
+    };
+
+    void loadLaunchFile();
 
     return () => { cancelled = true; };
   }, [loadVideo]);
@@ -164,6 +181,7 @@ export default function App() {
 
   const hasVideo = info !== null;
   const showVideo = src !== null || proxying;
+  const showLaunchLoading = !hasVideo && (checkingLaunchFile || loadingLaunchFile);
 
   return (
     <div className="app">
@@ -202,6 +220,10 @@ export default function App() {
               />
             )}
           </>
+        ) : showLaunchLoading ? (
+          <div className="launch-loading" role="status" aria-label="Opening video">
+            <div className="proxy-spinner" />
+          </div>
         ) : (
           <EmptyState onOpenFile={openFile} />
         )}
