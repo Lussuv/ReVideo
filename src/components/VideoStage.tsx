@@ -9,9 +9,10 @@ interface Props {
   player: ReturnType<typeof usePlayer>;
   proxying?: boolean;
   proxyProgress?: ProgressPayload | null;
+  onPlaybackError?: () => void;
 }
 
-export function VideoStage({ src, player, proxying, proxyProgress }: Props) {
+export function VideoStage({ src, player, proxying, proxyProgress, onPlaybackError }: Props) {
   const { videoRef, playing, currentTime, duration, volume, muted, toggle, skip, stepFrame, seek, setVolume, setMuted } = player;
   const [controlsVisible, setControlsVisible] = useState(true);
   const stageRef = useRef<HTMLDivElement | null>(null);
@@ -95,6 +96,7 @@ export function VideoStage({ src, player, proxying, proxyProgress }: Props) {
           src={src}
           className="video-el"
           onClick={toggle}
+          onError={onPlaybackError}
           preload="metadata"
         />
       )}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { TopBar } from "./components/TopBar";
 import { VideoStage } from "./components/VideoStage";
 import { TrimPanel } from "./components/TrimPanel";
@@ -14,6 +14,7 @@ import type { ExportPreset, ProgressPayload, TrimRange, VideoInfo } from "./type
 export default function App() {
   const [info, setInfo] = useState<VideoInfo | null>(null);
   const [src, setSrc] = useState<string | null>(null);
+  const [srcMode, setSrcMode] = useState<"original" | "proxy" | null>(null);
   const [thumbnails, setThumbnails] = useState<string[]>([]);
   const [trim, setTrim] = useState<TrimRange>({ startSec: 0, endSec: 0 });
   const [checkingLaunchFile, setCheckingLaunchFile] = useState(true);
@@ -32,6 +33,7 @@ export default function App() {
   const [pendingAutoplay, setPendingAutoplay] = useState(false);
 
   const player = usePlayer(info?.fps ?? 30);
+  const loadIdRef = useRef(0);
 
   useEffect(() => {
     let unlisten: (() => void) | null = null;
@@ -42,39 +44,67 @@ export default function App() {
     return () => { unlisten?.(); };
   }, []);
 
+  const startProxy = useCallback(async (path: string, loadId = loadIdRef.current) => {
+    setSrc(null);
+    setSrcMode(null);
+    setProxying(true);
+    setProxyProgress({ phase: "proxy", percent: 0, speed: "", etaSec: 0 });
+    setPendingAutoplay(true);
+
+    try {
+      const playable = await ensurePlayable(path, true);
+      if (loadId !== loadIdRef.current) return;
+      setSrcMode("proxy");
+      setSrc(fileUrl(playable.path));
+    } catch (err) {
+      if (loadId !== loadIdRef.current) return;
+      setErrorMsg(String(err));
+    } finally {
+      if (loadId === loadIdRef.current) {
+        setProxying(false);
+        setProxyProgress(null);
+      }
+    }
+  }, []);
+
   const loadVideo = useCallback(async (path: string) => {
+    const loadId = ++loadIdRef.current;
     try {
       setErrorMsg(null);
+      setProxying(false);
+      setProxyProgress(null);
+      setSrc(null);
+      setSrcMode(null);
+      setThumbnails([]);
+
       const meta = await getVideoInfo(path);
+      if (loadId !== loadIdRef.current) return;
+
       setInfo(meta);
       setTrim({ startSec: 0, endSec: meta.durationSec });
-      setThumbnails([]);
       setPendingAutoplay(true);
-
-      if (meta.browserPlayable) {
-        setSrc(fileUrl(path));
-      } else {
-        setSrc(null);
-        setProxying(true);
-        setProxyProgress({ phase: "proxy", percent: 0, speed: "", etaSec: 0 });
-        try {
-          const playable = await ensurePlayable(path);
-          setSrc(fileUrl(playable.path));
-        } finally {
-          setProxying(false);
-          setProxyProgress(null);
-        }
-      }
+      setSrcMode("original");
+      setSrc(fileUrl(path));
 
       generateThumbnails(path, 12)
-        .then((paths) => setThumbnails(paths.map(fileUrl)))
-        .catch(() => setThumbnails([]));
+        .then((paths) => {
+          if (loadId === loadIdRef.current) setThumbnails(paths.map(fileUrl));
+        })
+        .catch(() => {
+          if (loadId === loadIdRef.current) setThumbnails([]);
+        });
     } catch (err) {
+      if (loadId !== loadIdRef.current) return;
       setProxying(false);
       setProxyProgress(null);
       setErrorMsg(String(err));
     }
   }, []);
+
+  const handlePlaybackError = useCallback(() => {
+    if (!info || proxying || srcMode !== "original") return;
+    void startProxy(info.path);
+  }, [info, proxying, srcMode, startProxy]);
 
   const openFile = useCallback(async () => {
     const path = await pickVideoFile();
@@ -203,6 +233,7 @@ export default function App() {
               player={player}
               proxying={proxying}
               proxyProgress={proxyProgress}
+              onPlaybackError={handlePlaybackError}
             />
             {trimOpen && (
               <TrimPanel

@@ -33,8 +33,8 @@ export async function getVideoInfo(path: string): Promise<VideoInfo> {
   return await invoke<VideoInfo>("get_video_info", { path });
 }
 
-export async function ensurePlayable(path: string): Promise<PlayableSource> {
-  return await invoke<PlayableSource>("ensure_playable", { path });
+export async function ensurePlayable(path: string, forceProxy = false): Promise<PlayableSource> {
+  return await invoke<PlayableSource>("ensure_playable", { path, forceProxy });
 }
 
 export async function getLaunchFile(): Promise<string | null> {

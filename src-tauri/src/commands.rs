@@ -109,9 +109,13 @@ pub async fn get_video_info(app: AppHandle, path: String) -> Result<VideoInfo, S
 }
 
 #[tauri::command]
-pub async fn ensure_playable(app: AppHandle, path: String) -> Result<PlayableSource, String> {
+pub async fn ensure_playable(
+    app: AppHandle,
+    path: String,
+    force_proxy: Option<bool>,
+) -> Result<PlayableSource, String> {
     let probe = ffmpeg::probe(&app, &path).await.map_err(to_cmd_error)?;
-    if is_browser_playable(&probe, &path) {
+    if !force_proxy.unwrap_or(false) && is_browser_playable(&probe, &path) {
         return Ok(PlayableSource { path, is_proxy: false });
     }
 
