@@ -1,5 +1,6 @@
 use crate::ffmpeg::{self, is_browser_playable, parse_fps, FfError, FfTick};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Emitter};
 
@@ -62,6 +63,65 @@ pub fn get_launch_file() -> Option<String> {
                 None
             }
         })
+}
+
+#[tauri::command]
+pub fn quit_app(app: AppHandle) {
+    app.exit(0);
+}
+
+#[tauri::command]
+pub fn get_adjacent_video(
+    path: String,
+    direction: i32,
+    excluded_paths: Option<Vec<String>>,
+) -> Result<Option<String>, String> {
+    let current = PathBuf::from(&path);
+    let dir = current.parent().ok_or_else(|| "video has no parent directory".to_string())?;
+    let videos = video_files_in_dir(dir).map_err(to_cmd_error)?;
+    if videos.len() <= 1 {
+        return Ok(None);
+    }
+
+    let excluded: HashSet<PathBuf> = excluded_paths
+        .unwrap_or_default()
+        .into_iter()
+        .map(PathBuf::from)
+        .map(normalized_path)
+        .collect();
+
+    let current_canon = normalized_path(current);
+    let index = videos
+        .iter()
+        .position(|p| normalized_path(p.clone()) == current_canon)
+        .ok_or_else(|| "current video was not found in its folder".to_string())?;
+
+    for offset in 1..videos.len() {
+        let next_index = if direction < 0 {
+            (index + videos.len() - offset) % videos.len()
+        } else {
+            (index + offset) % videos.len()
+        };
+        let candidate = &videos[next_index];
+        if !excluded.contains(&normalized_path(candidate.clone())) {
+            return Ok(Some(candidate.to_string_lossy().to_string()));
+        }
+    }
+
+    Ok(None)
+}
+
+#[tauri::command]
+pub fn delete_video_file(path: String) -> Result<(), String> {
+    let path = PathBuf::from(path);
+    if !path.is_file() {
+        return Err("video file does not exist".into());
+    }
+    if !is_video_file(&path) {
+        return Err("not a supported video file".into());
+    }
+
+    move_file_to_trash(&path)
 }
 
 #[tauri::command]
@@ -401,6 +461,89 @@ fn proxy_path_for(input: &str) -> Result<PathBuf, std::io::Error> {
     let mut dir = ffmpeg::temp_subdir("proxies")?;
     dir.push(format!("{id}.mp4"));
     Ok(dir)
+}
+
+fn video_files_in_dir(dir: &Path) -> Result<Vec<PathBuf>, std::io::Error> {
+    let mut videos = Vec::new();
+    for entry in std::fs::read_dir(dir)? {
+        let path = entry?.path();
+        if path.is_file() && is_video_file(&path) {
+            videos.push(path);
+        }
+    }
+    videos.sort_by_key(|path| {
+        path.file_name()
+            .map(|name| name.to_string_lossy().to_lowercase())
+            .unwrap_or_default()
+    });
+    Ok(videos)
+}
+
+fn is_video_file(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| VIDEO_EXTS.contains(&ext.to_lowercase().as_str()))
+        .unwrap_or(false)
+}
+
+fn normalized_path(path: PathBuf) -> PathBuf {
+    path.canonicalize().unwrap_or(path)
+}
+
+#[cfg(windows)]
+fn move_file_to_trash(path: &Path) -> Result<(), String> {
+    use std::ffi::c_void;
+    use std::os::windows::ffi::OsStrExt;
+
+    const FO_DELETE: u32 = 0x0003;
+    const FOF_ALLOWUNDO: u16 = 0x0040;
+    const FOF_NOCONFIRMATION: u16 = 0x0010;
+    const FOF_NOERRORUI: u16 = 0x0400;
+    const FOF_SILENT: u16 = 0x0004;
+
+    #[repr(C)]
+    struct ShFileOpStructW {
+        hwnd: *mut c_void,
+        w_func: u32,
+        p_from: *const u16,
+        p_to: *const u16,
+        f_flags: u16,
+        f_any_operations_aborted: i32,
+        h_name_mappings: *mut c_void,
+        lpsz_progress_title: *const u16,
+    }
+
+    #[link(name = "Shell32")]
+    extern "system" {
+        fn SHFileOperationW(file_op: *mut ShFileOpStructW) -> i32;
+    }
+
+    let mut from: Vec<u16> = path.as_os_str().encode_wide().collect();
+    from.push(0);
+    from.push(0);
+
+    let mut op = ShFileOpStructW {
+        hwnd: std::ptr::null_mut(),
+        w_func: FO_DELETE,
+        p_from: from.as_ptr(),
+        p_to: std::ptr::null(),
+        f_flags: FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_SILENT,
+        f_any_operations_aborted: 0,
+        h_name_mappings: std::ptr::null_mut(),
+        lpsz_progress_title: std::ptr::null(),
+    };
+
+    let result = unsafe { SHFileOperationW(&mut op) };
+    if result == 0 && op.f_any_operations_aborted == 0 {
+        Ok(())
+    } else {
+        Err(format!("failed to move video to recycle bin: error code {result}"))
+    }
+}
+
+#[cfg(not(windows))]
+fn move_file_to_trash(path: &Path) -> Result<(), String> {
+    std::fs::remove_file(path).map_err(to_cmd_error)
 }
 
 fn job_id(path: &str) -> String {

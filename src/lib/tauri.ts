@@ -37,6 +37,22 @@ export async function ensurePlayable(path: string, forceProxy = false): Promise<
   return await invoke<PlayableSource>("ensure_playable", { path, forceProxy });
 }
 
+export async function getAdjacentVideo(
+  path: string,
+  direction: -1 | 1,
+  excludedPaths: string[] = [],
+): Promise<string | null> {
+  return await invoke<string | null>("get_adjacent_video", { path, direction, excludedPaths });
+}
+
+export async function deleteVideoFile(path: string): Promise<void> {
+  await invoke("delete_video_file", { path });
+}
+
+export async function quitApp(): Promise<void> {
+  await invoke("quit_app");
+}
+
 export async function getLaunchFile(): Promise<string | null> {
   return await invoke<string | null>("get_launch_file");
 }

@@ -1,7 +1,10 @@
 mod commands;
 mod ffmpeg;
 
-use commands::{ensure_playable, export_clip, generate_thumbnails, get_launch_file, get_video_info};
+use commands::{
+    delete_video_file, ensure_playable, export_clip, generate_thumbnails, get_adjacent_video,
+    get_launch_file, get_video_info, quit_app,
+};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -12,6 +15,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_video_info,
             get_launch_file,
+            quit_app,
+            get_adjacent_video,
+            delete_video_file,
             ensure_playable,
             export_clip,
             generate_thumbnails,

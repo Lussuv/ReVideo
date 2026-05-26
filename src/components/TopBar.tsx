@@ -1,5 +1,5 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { CloseIcon, FolderIcon, InfoIcon, MaxIcon, MinIcon, ScissorsIcon } from "./Icons";
+import { CloseIcon, FolderIcon, InfoIcon, MaxIcon, MinIcon, ScissorsIcon, SkipBackIcon, SkipFwdIcon, TrashIcon } from "./Icons";
 import logoUrl from "../../src-tauri/icons/icon.png";
 
 interface Props {
@@ -9,12 +9,16 @@ interface Props {
   onOpenFile: () => void;
   onToggleTrim: () => void;
   onToggleInfo: () => void;
+  onPreviousVideo: () => void;
+  onNextVideo: () => void;
+  onDeleteVideo: () => void;
+  onClose: () => void;
   onInfoButtonMount?: (el: HTMLButtonElement | null) => void;
 }
 
 export function TopBar({
   hasVideo, trimOpen, infoOpen,
-  onOpenFile, onToggleTrim, onToggleInfo, onInfoButtonMount,
+  onOpenFile, onToggleTrim, onToggleInfo, onPreviousVideo, onNextVideo, onDeleteVideo, onClose, onInfoButtonMount,
 }: Props) {
   const win = () => { try { return getCurrentWindow(); } catch { return null; } };
 
@@ -50,12 +54,21 @@ export function TopBar({
           <InfoIcon size={16} />
           <span>Info</span>
         </button>
+        <button className="tab tab-icon" onClick={onPreviousVideo} disabled={!hasVideo} title="Vorheriges Video">
+          <SkipBackIcon size={16} />
+        </button>
+        <button className="tab tab-icon" onClick={onNextVideo} disabled={!hasVideo} title="Nächstes Video">
+          <SkipFwdIcon size={16} />
+        </button>
+        <button className="tab tab-icon tab-danger" onClick={onDeleteVideo} disabled={!hasVideo} title="Video löschen (Entf)">
+          <TrashIcon size={16} />
+        </button>
       </nav>
 
       <div className="window-controls">
         <button className="wc-btn" onClick={() => win()?.minimize()}><MinIcon size={14} /></button>
         <button className="wc-btn" onClick={() => win()?.toggleMaximize()}><MaxIcon size={12} /></button>
-        <button className="wc-btn wc-close" onClick={() => win()?.close()}><CloseIcon size={14} /></button>
+        <button className="wc-btn wc-close" onClick={onClose}><CloseIcon size={14} /></button>
       </div>
     </header>
   );
