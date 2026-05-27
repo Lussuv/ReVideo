@@ -1,6 +1,6 @@
 [package]
 name = "revideo"
-version = "2.0.9"
+version = "2.1.0"
 description = "ReVideo - A sleek video trimmer & exporter"
 authors = ["you"]
 edition = "2021"

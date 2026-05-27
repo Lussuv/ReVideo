@@ -361,7 +361,7 @@ export default function App() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement) return;
+      if (e.target instanceof HTMLInputElement && e.target.type !== "range") return;
       if (deleteCandidate) {
         if (e.code === "Escape") {
           e.preventDefault();
