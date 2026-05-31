@@ -77,3 +77,9 @@ export const MaxIcon = (p: IconProps) => (
 export const CloseIcon = (p: IconProps) => (
   <svg {...base(p)}><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
 );
+export const CameraIcon = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+    <circle cx="12" cy="13" r="4" />
+  </svg>
+);

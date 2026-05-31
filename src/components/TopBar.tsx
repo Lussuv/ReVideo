@@ -1,5 +1,5 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { CloseIcon, FolderIcon, InfoIcon, MaxIcon, MinIcon, ScissorsIcon, SkipBackIcon, SkipFwdIcon, TrashIcon } from "./Icons";
+import { CameraIcon, CloseIcon, FolderIcon, InfoIcon, MaxIcon, MinIcon, ScissorsIcon, SkipBackIcon, SkipFwdIcon, TrashIcon } from "./Icons";
 import logoUrl from "../../src-tauri/icons/icon.png";
 
 interface Props {
@@ -14,11 +14,13 @@ interface Props {
   onDeleteVideo: () => void;
   onClose: () => void;
   onInfoButtonMount?: (el: HTMLButtonElement | null) => void;
+  onSaveFrame: () => void;
 }
 
 export function TopBar({
   hasVideo, trimOpen, infoOpen,
   onOpenFile, onToggleTrim, onToggleInfo, onPreviousVideo, onNextVideo, onDeleteVideo, onClose, onInfoButtonMount,
+  onSaveFrame,
 }: Props) {
   const win = () => { try { return getCurrentWindow(); } catch { return null; } };
 
@@ -53,6 +55,15 @@ export function TopBar({
         >
           <InfoIcon size={16} />
           <span>Info</span>
+        </button>
+        <button
+          className="tab"
+          onClick={onSaveFrame}
+          disabled={!hasVideo}
+          title="Aktuellen Frame als Bild speichern"
+        >
+          <CameraIcon size={16} />
+          <span>FrameSafe</span>
         </button>
         <button className="tab tab-icon" onClick={onPreviousVideo} disabled={!hasVideo} title="Vorheriges Video">
           <SkipBackIcon size={16} />

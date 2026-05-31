@@ -98,6 +98,7 @@ export function VideoStage({ src, player, proxying, proxyProgress, onPlaybackErr
           onClick={toggle}
           onError={onPlaybackError}
           preload="metadata"
+          crossOrigin="anonymous"
         />
       )}
 

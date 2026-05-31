@@ -8,7 +8,7 @@ import { EmptyState } from "./components/EmptyState";
 import { usePlayer } from "./hooks/usePlayer";
 import {
   deleteVideoFile, ensurePlayable, exportClip, fileUrl, generateThumbnails, getAdjacentVideo, getLaunchFile, getVideoInfo,
-  onFfProgress, pickExportDestination, pickVideoFile, quitApp,
+  onFfProgress, pickExportDestination, pickVideoFile, quitApp, saveImageFile,
 } from "./lib/tauri";
 import type { ExportPreset, ProgressPayload, TrimRange, VideoInfo } from "./types";
 
@@ -359,6 +359,30 @@ export default function App() {
     }
   }, [info, preset, trim]);
 
+  const handleSaveFrame = useCallback(async () => {
+    if (!info || !player.videoEl) return;
+    const video = player.videoEl;
+    try {
+      const canvas = document.createElement("canvas");
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("Could not create 2D context for canvas");
+
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const dataUrl = canvas.toDataURL("image/png");
+
+      const base = info.fileName.replace(/\.[^.]+$/, "");
+      const suggested = `${base}_frame.png`;
+      const dest = await pickExportDestination(suggested, "png");
+      if (!dest) return;
+
+      await saveImageFile(dest, dataUrl);
+    } catch (err) {
+      setErrorMsg(String(err));
+    }
+  }, [info, player.videoEl]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement && e.target.type !== "range") return;
@@ -419,6 +443,7 @@ export default function App() {
         onDeleteVideo={() => void deleteCurrentVideo()}
         onClose={() => void finishDeletesThenClose()}
         onInfoButtonMount={setInfoAnchor}
+        onSaveFrame={handleSaveFrame}
       />
 
       <main className="content">

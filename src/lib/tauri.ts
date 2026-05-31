@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
+import { writeFile } from "@tauri-apps/plugin-fs";
 import type { ExportPreset, PlayableSource, ProgressPayload, VideoInfo } from "../types";
 
 const VIDEO_EXTS = [
@@ -78,4 +79,15 @@ export async function onFfProgress(
   cb: (payload: ProgressPayload) => void,
 ): Promise<UnlistenFn> {
   return await listen<ProgressPayload>("ff-progress", (e) => cb(e.payload));
+}
+
+export async function saveImageFile(path: string, base64DataUrl: string): Promise<void> {
+  const base64Data = base64DataUrl.replace(/^data:image\/\w+;base64,/, "");
+  const binaryString = atob(base64Data);
+  const len = binaryString.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  await writeFile(path, bytes);
 }
