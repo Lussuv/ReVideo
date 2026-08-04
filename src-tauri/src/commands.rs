@@ -2,6 +2,7 @@ use crate::ffmpeg::{self, is_browser_playable, parse_fps, FfError, FfTick};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use tauri::{AppHandle, Emitter};
 
 const VIDEO_EXTS: &[&str] = &[
@@ -413,51 +414,85 @@ fn parse_eta(speed_str: &str, total_us: u64, done_us: u64) -> f64 {
     (remaining_us / 1_000_000.0) / factor
 }
 
+/// Bumped by every thumbnail request and by `cancel_thumbnails`. A running job
+/// compares its own id against this between frames and bails out as soon as a
+/// newer request arrives — without it, paging through a folder leaves one
+/// ffmpeg per visited file grinding away in the background.
+static THUMB_GEN: AtomicU64 = AtomicU64::new(0);
+
+#[tauri::command]
+pub fn cancel_thumbnails() {
+    THUMB_GEN.fetch_add(1, Ordering::SeqCst);
+}
+
 #[tauri::command]
 pub async fn generate_thumbnails(
     app: AppHandle,
     path: String,
     count: u32,
 ) -> Result<Vec<String>, String> {
+    if count == 0 { return Ok(vec![]); }
+
+    // Newest request wins; whatever is still running for a previous video stops.
+    let generation = THUMB_GEN.fetch_add(1, Ordering::SeqCst) + 1;
+
+    let dir = ffmpeg::temp_subdir(&job_id(&path)).map_err(to_cmd_error)?;
+    let targets: Vec<PathBuf> = (1..=count)
+        .map(|i| dir.join(format!("thumb_{:03}.jpg", i)))
+        .collect();
+
+    // Re-opening a file we already scrubbed must not touch ffmpeg at all.
+    if targets.iter().all(|p| p.exists()) {
+        return Ok(targets.iter().map(|p| p.to_string_lossy().to_string()).collect());
+    }
+
     let probe = ffmpeg::probe(&app, &path).await.map_err(to_cmd_error)?;
     let duration = probe.format.duration
         .as_deref()
         .and_then(|s| s.parse::<f64>().ok())
         .unwrap_or(0.0);
-    if duration <= 0.0 || count == 0 { return Ok(vec![]); }
+    if duration <= 0.0 { return Ok(vec![]); }
 
-    let dir = ffmpeg::temp_subdir(&job_id(&path)).map_err(to_cmd_error)?;
-
-    let fps = (count as f64) / duration;
-    let pattern = dir.join("thumb_%03d.jpg");
-    let pattern_str = pattern.to_string_lossy().to_string();
-
-    let args = vec![
-        "-y".into(),
-        "-i".into(), path.clone(),
-        "-vf".into(), format!("fps={:.6},scale=160:-2", fps.max(0.0001)),
-        "-frames:v".into(), count.to_string(),
-        "-q:v".into(), "5".into(),
-        pattern_str,
-    ];
-    ffmpeg::run_ffmpeg(&app, args).await.map_err(to_cmd_error)?;
-
-    let mut out = Vec::new();
-    for i in 1..=count {
-        let p = dir.join(format!("thumb_{:03}.jpg", i));
-        if p.exists() { out.push(p.to_string_lossy().to_string()); }
+    let mut out = Vec::with_capacity(count as usize);
+    for (i, target) in targets.iter().enumerate() {
+        if THUMB_GEN.load(Ordering::SeqCst) != generation { return Ok(vec![]); }
+        if !target.exists() {
+            // One seek per thumbnail, with `-ss` *before* `-i`: input seeking
+            // jumps to the nearest keyframe. Selecting frames with an `fps`
+            // filter instead would make ffmpeg decode the entire file to reach
+            // the last thumbnail — minutes of CPU on a multi-GB AV1 source.
+            let ts = duration * (i as f64 + 0.5) / (count as f64);
+            let args = vec![
+                "-y".into(),
+                "-v".into(), "error".into(),
+                "-ss".into(), format!("{:.3}", ts),
+                "-i".into(), path.clone(),
+                "-frames:v".into(), "1".into(),
+                "-vf".into(), "scale=160:-2".into(),
+                "-q:v".into(), "5".into(),
+                "-an".into(), "-sn".into(),
+                target.to_string_lossy().to_string(),
+            ];
+            // A seek landing past the last decodable frame yields nothing;
+            // skip that slot rather than failing the whole strip.
+            if ffmpeg::run_ffmpeg(&app, args).await.is_err() { continue; }
+        }
+        if target.exists() { out.push(target.to_string_lossy().to_string()); }
     }
     Ok(out)
 }
 
-fn proxy_path_for(input: &str) -> Result<PathBuf, std::io::Error> {
-    let mtime = std::fs::metadata(input)
+fn file_mtime(path: &str) -> u64 {
+    std::fs::metadata(path)
         .and_then(|m| m.modified())
         .ok()
         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
         .map(|d| d.as_secs())
-        .unwrap_or(0);
-    let id = stable_hash(&format!("{input}|{mtime}"));
+        .unwrap_or(0)
+}
+
+fn proxy_path_for(input: &str) -> Result<PathBuf, std::io::Error> {
+    let id = stable_hash(&format!("{input}|{}", file_mtime(input)));
     let mut dir = ffmpeg::temp_subdir("proxies")?;
     dir.push(format!("{id}.mp4"));
     Ok(dir)
@@ -546,8 +581,10 @@ fn move_file_to_trash(path: &Path) -> Result<(), String> {
     std::fs::remove_file(path).map_err(to_cmd_error)
 }
 
+/// Keyed on mtime as well as path so an edited file never serves stale frames
+/// from the cache.
 fn job_id(path: &str) -> String {
-    format!("thumbs-{}", stable_hash(path))
+    format!("thumbs-{}", stable_hash(&format!("{path}|{}", file_mtime(path))))
 }
 
 fn stable_hash(s: &str) -> String {

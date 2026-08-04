@@ -7,7 +7,7 @@ import { InfoPopover } from "./components/InfoPopover";
 import { EmptyState } from "./components/EmptyState";
 import { usePlayer } from "./hooks/usePlayer";
 import {
-  deleteVideoFile, ensurePlayable, exportClip, fileUrl, generateThumbnails, getAdjacentVideo, getLaunchFile, getVideoInfo,
+  cancelThumbnails, deleteVideoFile, ensurePlayable, exportClip, fileUrl, generateThumbnails, getAdjacentVideo, getLaunchFile, getVideoInfo,
   onFfProgress, pickExportDestination, pickVideoFile, quitApp, saveImageFile,
 } from "./lib/tauri";
 import type { ExportPreset, ProgressPayload, TrimRange, VideoInfo } from "./types";
@@ -140,6 +140,7 @@ export default function App() {
 
   const clearVideo = useCallback(() => {
     loadIdRef.current += 1;
+    void cancelThumbnails();
     player.pause();
     setInfo(null);
     setSrc(null);

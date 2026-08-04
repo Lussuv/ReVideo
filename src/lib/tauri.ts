@@ -74,6 +74,11 @@ export async function generateThumbnails(path: string, count: number): Promise<s
   return await invoke<string[]>("generate_thumbnails", { path, count });
 }
 
+/// Stops a thumbnail job still running for a video we navigated away from.
+export async function cancelThumbnails(): Promise<void> {
+  await invoke("cancel_thumbnails");
+}
+
 /// Subscribe to ffmpeg progress ticks. Returns an unsubscribe function.
 export async function onFfProgress(
   cb: (payload: ProgressPayload) => void,

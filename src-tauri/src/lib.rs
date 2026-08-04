@@ -2,8 +2,8 @@ mod commands;
 mod ffmpeg;
 
 use commands::{
-    delete_video_file, ensure_playable, export_clip, generate_thumbnails, get_adjacent_video,
-    get_launch_file, get_video_info, quit_app,
+    cancel_thumbnails, delete_video_file, ensure_playable, export_clip, generate_thumbnails,
+    get_adjacent_video, get_launch_file, get_video_info, quit_app,
 };
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -21,6 +21,7 @@ pub fn run() {
             ensure_playable,
             export_clip,
             generate_thumbnails,
+            cancel_thumbnails,
         ])
         .run(tauri::generate_context!())
         .expect("error while running ReVideo");
