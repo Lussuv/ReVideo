@@ -1,6 +1,6 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { CameraIcon, CloseIcon, FolderIcon, InfoIcon, MaxIcon, MinIcon, ScissorsIcon, SkipBackIcon, SkipFwdIcon, TrashIcon } from "./Icons";
-import logoUrl from "../../src-tauri/icons/icon.png";
+import logoUrl from "../../src-tauri/icons/128x128.png";
 
 interface Props {
   hasVideo: boolean;

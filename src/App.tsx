@@ -432,6 +432,13 @@ export default function App() {
 
   return (
     <div className="app">
+      <div className="bg" aria-hidden>
+        <i className="bg-hex bg-hex-1" />
+        <i className="bg-hex bg-hex-2" />
+        <i className="bg-hex bg-hex-3" />
+      </div>
+      <div className="grain" aria-hidden />
+
       <TopBar
         hasVideo={hasVideo}
         trimOpen={trimOpen}
