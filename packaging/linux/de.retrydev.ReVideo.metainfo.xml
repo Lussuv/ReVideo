@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>de.retrydev.ReVideo</id>
+  <name>ReVideo</name>
+  <summary>Video-Player und Trimmer</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>LicenseRef-proprietary</project_license>
+  <developer id="de.retrydev">
+    <name>Retry</name>
+  </developer>
+  <description>
+    <p>Spielt Videos ab, schneidet sie verlustfrei zu und exportiert Clips unter 10 MB für Discord.</p>
+  </description>
+  <launchable type="desktop-id">de.retrydev.ReVideo.desktop</launchable>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="3.0.0" date="2026-10-28"/>
+  </releases>
+</component>

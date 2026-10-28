@@ -1,9 +1,9 @@
-# dependencies
-node_modules/
-
 # build output
-dist/
-dist-ssr/
+/target/
+/build/
+/dist/
+/.flatpak-builder/
+__pycache__/
 
 # editors / OS
 .DS_Store
@@ -11,18 +11,5 @@ dist-ssr/
 !.vscode/extensions.json
 .idea/
 
-# rust / tauri
-src-tauri/target/
-src-tauri/Cargo.lock
-
-# bundled ffmpeg sidecar (binary, fetched per machine)
-src-tauri/binaries/*.exe
-src-tauri/binaries/*.zip
-
-# temp / proxy media
-.proxy-cache/
-*.local
-
 # logs
 *.log
-npm-debug.log*

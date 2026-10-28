@@ -1,79 +1,129 @@
-# Retry Player (ReVideo)
+# ReVideo
 
-Schlanker, dunkler Video-Player & Trimmer für Windows — Tauri 2 + Rust + React.
+Schlanker Video-Player und Trimmer für Linux und Windows, geschrieben in Rust mit
+[iced](https://iced.rs). Die Wiedergabe läuft über GStreamer, Info, Thumbnails,
+Frame-Export und Schnitt über ffmpeg.
 
-## Features (Grundaufbau)
-- Öffnen beliebiger Videoformate (MP4, MKV, MOV, AVI, WebM, FLV, WMV, …)
-- Play / Pause, −5s / +5s, vorheriger / nächster Frame
-- Lautstärke-Slider, Mute, Fullscreen
-- Trim-Timeline mit zwei Drag-Handles, Thumbnail-Strip, präzise Start/End-Inputs
-- Export in MP4 (H.264 / H.265), WebM (VP9), MOV (ProRes), GIF
-- FFmpeg läuft als Sidecar — kein System-FFmpeg nötig
+- Spielt MP4, MKV, MOV, AVI, WebM, FLV, WMV, MPEG-TS, 3GP … direkt ab (H.264, HEVC, VP9, AV1)
+- Trim-Timeline mit Thumbnails, Griffen und exakter Zeiteingabe
+- Export **Original** (verlustfreier Stream-Copy) oder **Discord** (2-Pass H.264, ≤ 10 MB, 1080p, 30 fps)
+- Aktuellen Frame als PNG speichern, Vor/Zurück im Ordner, Löschen in den Papierkorb
+- Tasten: `Leertaste` Play/Pause · `←`/`→` ±5 s · `,`/`.` Frame zurück/vor · `Entf` löschen · `F11` Vollbild
 
-## Erstmaliges Setup
+Ausgeliefert wird als **Flatpak** (Linux) und als **NSIS-Installer** (Windows). Beides
+wird unter Linux gebaut.
 
-### 1) Toolchain installieren
-- **Rust**: https://rustup.rs (rustup-init.exe ausführen)
-- **Node.js**: https://nodejs.org (LTS reicht; bringt npm mit)
-- **Visual Studio Build Tools** (für Tauri unter Windows): "C++ build tools" Workload installieren
+## Entwicklungsumgebung einrichten
 
-### 2) Repo-Dependencies
-```powershell
-npm install
+### 1. Pakete
+
+Arch / CachyOS:
+
+```sh
+sudo pacman -S --needed base-devel rustup pkgconf python zstd \
+    gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad gst-plugins-ugly gst-libav ffmpeg \
+    mingw-w64-gcc flatpak flatpak-builder watchexec
+paru -S nsis   # makensis — falls es nicht in den offiziellen Repos liegt, aus dem AUR
 ```
 
-### 3) FFmpeg-Sidecar holen
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts/fetch-ffmpeg.ps1
+Debian / Ubuntu:
+
+```sh
+sudo apt install build-essential curl pkg-config python3 zstd \
+    libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-plugins-good \
+    gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav ffmpeg \
+    libxkbcommon-dev libwayland-dev mingw-w64 nsis flatpak flatpak-builder
+curl https://sh.rustup.rs -sSf | sh
+cargo install --locked watchexec-cli
 ```
 
-### 3b) App-Icons generieren (einmalig)
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts/generate-icons.ps1
-```
-Erzeugt das Lila-Hexagon-Logo unter `src-tauri/icons/` in allen von Tauri
-benötigten Größen + Multi-Res-ICO. Eigenes Logo? Einfach ein 1024×1024-PNG
-mit `npm run tauri icon <pfad>` schicken — überschreibt diese.
-Lädt die gyan.dev-Essentials-Builds und legt sie unter
-`src-tauri/binaries/ffmpeg-<triple>.exe` / `ffprobe-<triple>.exe` ab.
-Die Binaries sind in `.gitignore` ausgeschlossen.
+### 2. Rust-Toolchain
 
-### 4) Starten
-```powershell
-npm run tauri dev
+```sh
+rustup default stable
+rustup target add x86_64-pc-windows-gnu   # für den Windows-Build
 ```
 
-### 5) Release-Build
-```powershell
-npm run tauri build
-```
-Erzeugt MSI- und NSIS-Installer unter `src-tauri/target/release/bundle/`.
+### 3. Starten und testen
 
-## Tastatur-Shortcuts
-| Taste | Aktion |
-|------|--------|
-| `Space` | Play / Pause |
-| `←` / `→` | −5s / +5s |
-| `,` / `.` | Vorheriger / nächster Frame |
+Live-Test (speichern → neu bauen → App startet neu, ca. 5 s):
 
-## Struktur
-```
-src/                     React + TS UI
-  components/            TopBar, VideoStage, TrimTimeline, Sidebar-Cards, EmptyState, Icons
-  hooks/usePlayer.ts     <video>-State-Bindings
-  lib/                   Tauri-Bridge & Formatter
-src-tauri/               Tauri/Rust Backend
-  src/commands.rs        get_video_info, export_clip, generate_thumbnails
-  src/ffmpeg.rs          Sidecar-Wrapper (ffmpeg + ffprobe)
-  binaries/              ffmpeg-<triple>.exe (per Script geholt, nicht im Repo)
-scripts/fetch-ffmpeg.ps1 FFmpeg-Download-Helper
+```sh
+watchexec -r -e rs,toml -w src -w Cargo.toml -- cargo run
 ```
 
-## Ideen für die nächste Iteration
-- Drag & Drop ins Fenster
-- Recents-Liste (zuletzt geöffnete Dateien)
-- Audio-Wellenform unter der Trim-Timeline
-- Speed-Control (0.25× … 4×)
-- Mehrfach-Cut (mehr als ein Trim-Range pro Export)
-- Pixel-genauer Step über `ffmpeg -filter_complex select=` statt fps-Schätzung
-- Proxy-Pipeline für riesige 4K-Dateien (vorab in kleine MP4-Preview transcoden)
+Im VS-Code-Devcontainer gibt es keine D-Bus-Session und kein xdg-desktop-portal, ohne
+die der Datei-Dialog nicht aufgeht. Einmalig installieren:
+
+```sh
+sudo apt install xdg-desktop-portal xdg-desktop-portal-gtk dbus
+```
+
+Dann den Live-Test über das Skript starten. Es startet beides mit und blendet das
+weitergeleitete X-Display aus („Authorization required“):
+
+```sh
+scripts/dev-container.sh
+```
+
+Einmal starten, mit oder ohne Datei:
+
+```sh
+cargo run
+```
+
+```sh
+cargo run -- ~/Videos/clip.mkv
+```
+
+Tests (der zweite Befehl macht zusätzlich einen echten Export mit ffmpeg, beide Vorlagen):
+
+```sh
+cargo test
+```
+
+```sh
+cargo test -- --include-ignored
+```
+
+### 4. Release bauen
+
+```sh
+scripts/build.sh            # beides
+scripts/build.sh linux      # nur Flatpak
+scripts/build.sh windows    # nur Windows-Installer
+```
+
+Ergebnis in `dist/`:
+
+| Datei | Inhalt |
+|---|---|
+| `ReVideo-<version>-x86_64.flatpak` | Flatpak-Bundle, installieren mit `flatpak install --user dist/ReVideo-*.flatpak` |
+| `ReVideo-<version>-setup.exe` | Windows-Installer (pro Benutzer, ohne Admin-Rechte), trägt ReVideo unter „Öffnen mit“ ein |
+
+Die Version steht nur in `Cargo.toml`. Build-Skript und Installer lesen sie von dort.
+
+**Flatpak:** Beim ersten Lauf werden die Runtime `org.freedesktop.Platform//25.08` und
+die Rust-SDK-Erweiterung von Flathub installiert. ffmpeg und x264 werden ins Flatpak
+gebaut, GStreamer samt Codecs kommt aus der Runtime. `flatpak-builder` braucht
+User-Namespaces, läuft also auf dem Host und nicht in einem unprivilegierten Container.
+
+**Windows:** `scripts/fetch-windows-deps.py` lädt GStreamer und ffmpeg aus dem
+MSYS2-Repository (`ucrt64`) nach `build/windows/sysroot`. Danach wird mit
+`x86_64-pc-windows-gnu` cross-kompiliert, und `scripts/stage-windows.py` kopiert
+nur die tatsächlich importierten DLLs in den Installer. Wenn du `build/windows`
+löschst, holt der nächste Lauf aktuelle Pakete.
+
+## Aufbau
+
+```
+src/main.rs       Einstieg, Fenster, Schriften
+src/app.rs        Zustand, Update-Logik, Oberfläche
+src/timeline.rs   Trim-Timeline (Canvas)
+src/media.rs      Export, Thumbnails, Frame speichern, Ordner-Navigation, Papierkorb
+src/ffmpeg.rs     ffmpeg/ffprobe-Aufrufe mit Fortschritt
+src/theme.rs      Retry-Design-Farben und Widget-Stile
+packaging/        Flatpak-Manifest, Desktop-Datei, NSIS-Skript
+scripts/          Build-Skript und Windows-Helfer
+assets/           Icons, Schriften (Inter, JetBrains Mono — OFL)
+```

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=ReVideo
+Comment=Video-Player und Trimmer
+Exec=revideo %f
+Icon=de.retrydev.ReVideo
+Terminal=false
+Categories=AudioVideo;Video;Player;
+MimeType=video/mp4;video/x-matroska;video/quicktime;video/x-msvideo;video/webm;video/x-flv;video/x-ms-wmv;video/x-m4v;video/mpeg;video/mp2t;video/3gpp;
