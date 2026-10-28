@@ -15,7 +15,7 @@ from pathlib import Path
 
 OBJDUMP = shutil.which("x86_64-w64-mingw32-objdump") or "objdump"
 # Plugins that drag in large stacks (GTK, Qt, Python, OpenCV, …) the player never uses.
-SKIP_PLUGINS = re.compile(r"gtk|qt|python|opencv|vulkan|webrtc|nice|srt|rtmp|onnx|whisper|aja|decklink")
+SKIP_PLUGINS = re.compile(r"gtk|qt|python|opencv|vulkan|webrtc|nice|srt|rtmp|onnx|whisper|aja|decklink|codec2json")
 
 
 def imports(binary: Path) -> list[str]:

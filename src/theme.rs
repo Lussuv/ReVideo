@@ -7,6 +7,7 @@ pub const BG_2: Color = color!(0x1C1F27);
 pub const SF: Color = color!(0x272B36);
 pub const SF_2: Color = color!(0x363C4A);
 pub const SF_3: Color = color!(0x474E60);
+pub const SF_4: Color = color!(0x596177);
 
 pub const LN_SOFT: Color = Color::from_rgba(1.0, 1.0, 1.0, 0.12);
 pub const LN: Color = Color::from_rgba(1.0, 1.0, 1.0, 0.18);
@@ -206,7 +207,7 @@ pub fn secondary(selected: bool) -> impl Fn(&Theme, button::Status) -> button::S
             text_color: TX,
             border: Border {
                 color: if selected {
-                    A_RING
+                    TX_2
                 } else if hover {
                     LN_STRONG
                 } else {
@@ -235,11 +236,7 @@ pub fn danger(selected: bool) -> impl Fn(&Theme, button::Status) -> button::Styl
             ),
             text_color: ERR,
             border: Border {
-                color: if selected {
-                    A_RING
-                } else {
-                    ERR.scale_alpha(0.5)
-                },
+                color: if selected { ERR } else { ERR.scale_alpha(0.5) },
                 width: if selected { 2.0 } else { 1.0 },
                 radius: R_1.into(),
             },
@@ -308,5 +305,15 @@ pub fn time_input(_: &Theme, status: text_input::Status) -> text_input::Style {
         placeholder: TX_3,
         value: TX,
         selection: A_RING,
+    }
+}
+
+pub fn tooltip(_: &Theme) -> container::Style {
+    container::Style {
+        background: Some(SF_4.into()),
+        border: border::rounded(R_1),
+        shadow: sh(2),
+        text_color: Some(TX),
+        ..Default::default()
     }
 }

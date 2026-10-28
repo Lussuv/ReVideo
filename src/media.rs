@@ -174,6 +174,35 @@ pub fn check_file_dialog() -> Result<(), String> {
     Ok(())
 }
 
+/// Seeks on a background thread. A flushing, frame-accurate seek blocks until
+/// the decoder has reached the target; doing that on the UI thread made
+/// dragging stutter. Targets that pile up meanwhile are skipped, only the
+/// newest one is executed.
+pub struct Seeker(std::sync::mpsc::Sender<f64>);
+
+impl Seeker {
+    pub fn new(pipeline: gstreamer::Pipeline) -> Self {
+        use gstreamer::prelude::*;
+        let (tx, rx) = std::sync::mpsc::channel::<f64>();
+        std::thread::spawn(move || {
+            while let Ok(mut target) = rx.recv() {
+                while let Ok(newer) = rx.try_recv() {
+                    target = newer;
+                }
+                let _ = pipeline.seek_simple(
+                    gstreamer::SeekFlags::FLUSH | gstreamer::SeekFlags::ACCURATE,
+                    gstreamer::ClockTime::from_nseconds((target * 1e9) as u64),
+                );
+            }
+        });
+        Self(tx)
+    }
+
+    pub fn seek(&self, sec: f64) {
+        let _ = self.0.send(sec);
+    }
+}
+
 pub fn move_to_trash(path: &Path) -> Result<(), String> {
     #[cfg(target_os = "linux")]
     if Path::new("/.flatpak-info").exists() {

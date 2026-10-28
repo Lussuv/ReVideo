@@ -19,6 +19,8 @@ pub struct TrimRange {
 pub enum TimelineEvent {
     Trim(TrimRange),
     Seek(f64),
+    /// Mouse released after dragging.
+    Release,
 }
 
 pub struct Timeline {
@@ -114,7 +116,7 @@ impl canvas::Program<TimelineEvent> for Timeline {
                 if !matches!(drag, Drag::None) =>
             {
                 *drag = Drag::None;
-                Some(Action::capture())
+                Some(Action::publish(TimelineEvent::Release).and_capture())
             }
             _ => None,
         }

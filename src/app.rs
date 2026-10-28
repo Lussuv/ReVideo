@@ -5,8 +5,8 @@ use crate::theme::{self, *};
 use crate::timeline::{Timeline, TimelineEvent, TrimRange, HANDLE_W, TICKS_H};
 use iced::keyboard::{self, key::Named, Key};
 use iced::widget::{
-    button, canvas, center, column, container, image, mouse_area, opaque, row, slider, space,
-    stack, text, text_input,
+    button, canvas, center, column, container, image, mouse_area, opaque, row, sensor, slider,
+    space, stack, text, text_input, tooltip,
 };
 use iced::{window, Alignment, Element, Length, Subscription, Task};
 use iced_video_player::{Video, VideoPlayer};
@@ -39,6 +39,7 @@ pub enum Message {
     Tick,
     ToggleTrim,
     ToggleInfo,
+    InfoAnchor(iced::Size),
     Navigate(i32),
     Timeline(TimelineEvent),
     StartText(String),
@@ -71,11 +72,14 @@ pub enum DeleteChoice {
 pub struct App {
     info: Option<VideoInfo>,
     video: Option<Video>,
+    seeker: Option<media::Seeker>,
     load_id: u64,
     loading: bool,
     thumbnails: Vec<image::Handle>,
     position: f64,
     seeking: bool,
+    /// Playhead position before a trim handle drag; restored on release.
+    trim_drag_origin: Option<f64>,
     volume: f64,
     muted: bool,
     fullscreen: bool,
@@ -84,6 +88,8 @@ pub struct App {
 
     trim_open: bool,
     info_open: bool,
+    /// Width of the topbar items left of the Info button; positions the popover under it.
+    info_anchor: f32,
     trim: TrimRange,
     start_text: Option<String>,
     end_text: Option<String>,
@@ -101,11 +107,13 @@ impl App {
         let app = Self {
             info: None,
             video: None,
+            seeker: None,
             load_id: 0,
             loading: false,
             thumbnails: Vec::new(),
             position: 0.0,
             seeking: false,
+            trim_drag_origin: None,
             volume: 0.8,
             muted: false,
             fullscreen: false,
@@ -113,6 +121,7 @@ impl App {
             controls_hovered: false,
             trim_open: false,
             info_open: false,
+            info_anchor: 0.0,
             trim: TrimRange {
                 start: 0.0,
                 end: 0.0,
@@ -146,12 +155,36 @@ impl App {
         self.info.as_ref().map_or(0.0, |i| i.duration_sec)
     }
 
-    fn seek(&mut self, sec: f64, accurate: bool) {
-        let sec = sec.clamp(0.0, self.duration());
-        if let Some(video) = &mut self.video {
-            if let Err(e) = video.seek(Duration::from_secs_f64(sec), accurate) {
-                self.error = Some(format!("Springen fehlgeschlagen: {e}"));
-            }
+    fn frame(&self) -> f64 {
+        let fps = self.info.as_ref().map_or(0.0, |i| i.fps as f64);
+        1.0 / if fps > 0.0 { fps } else { 30.0 }
+    }
+
+    /// Rounds to the start of the nearest frame; cuts between frames would
+    /// leave a shortened (broken) frame at the edge of an export.
+    fn snap(&self, sec: f64) -> f64 {
+        snap_to_frame(sec, self.frame())
+    }
+
+    fn set_trim(&mut self, start: f64, end: f64) {
+        let (frame, duration) = (self.frame(), self.duration());
+        let end = self.snap(end).clamp(frame, duration);
+        let start = self.snap(start).clamp(0.0, end - frame);
+        self.trim = TrimRange { start, end };
+    }
+
+    /// Seeks to the frame at `sec`; with the trim panel open the playhead
+    /// stays between the trim start and the last frame before the trim end.
+    fn seek(&mut self, sec: f64) {
+        let mut sec = self.snap(sec).clamp(0.0, self.duration());
+        if self.trim_open {
+            sec = sec.clamp(
+                self.trim.start,
+                (self.trim.end - self.frame()).max(self.trim.start),
+            );
+        }
+        if let Some(seeker) = &self.seeker {
+            seeker.seek(sec);
         }
         self.position = sec;
     }
@@ -164,6 +197,7 @@ impl App {
         self.load_id += 1;
         media::cancel_thumbnails();
         self.video = None;
+        self.seeker = None;
         self.info = None;
         self.thumbnails.clear();
         self.position = 0.0;
@@ -218,6 +252,7 @@ impl App {
                             video.set_muted(self.muted);
                         }
                         video.set_paused(false);
+                        self.seeker = Some(media::Seeker::new(video.pipeline()));
                         self.video = Some(video);
                     }
                     Err(e) => {
@@ -252,7 +287,7 @@ impl App {
                         || self.position < self.trim.start - 0.05)
                 {
                     let start = self.trim.start;
-                    self.seek(start, false);
+                    self.seek(start);
                 }
             }
             Message::EndOfStream => {
@@ -264,7 +299,13 @@ impl App {
             Message::TogglePlay => {
                 if let Some(video) = &mut self.video {
                     if video.eos() {
+                        // restart_stream clears the end-of-stream state but jumps to 0;
+                        // continue from where the playhead was moved to instead.
                         let _ = video.restart_stream();
+                        let pos = self.position;
+                        if pos < self.duration() - self.frame() {
+                            self.seek(pos);
+                        }
                     } else {
                         video.set_paused(!video.paused());
                     }
@@ -273,29 +314,22 @@ impl App {
             }
             Message::Skip(delta) => {
                 let target = self.position + delta;
-                self.seek(target, false);
+                self.seek(target);
                 self.show_controls();
             }
             Message::StepFrame(dir) => {
-                let fps =
-                    self.info
-                        .as_ref()
-                        .map_or(30.0, |i| if i.fps > 0.0 { i.fps as f64 } else { 30.0 });
                 if let Some(video) = &mut self.video {
                     video.set_paused(true);
                 }
-                let target = self.position + dir as f64 / fps;
-                self.seek(target, true);
+                let target = self.position + dir as f64 * self.frame();
+                self.seek(target);
             }
+            // Seeks on every move so the picture follows the handle.
             Message::SeekDrag(sec) => {
                 self.seeking = true;
-                self.position = sec;
+                self.seek(sec);
             }
-            Message::SeekRelease => {
-                self.seeking = false;
-                let pos = self.position;
-                self.seek(pos, false);
-            }
+            Message::SeekRelease => self.seeking = false,
             Message::Volume(v) => {
                 self.volume = v;
                 if v > 0.0 {
@@ -329,6 +363,7 @@ impl App {
             Message::Tick => {}
             Message::ToggleTrim => self.trim_open = !self.trim_open,
             Message::ToggleInfo => self.info_open = !self.info_open,
+            Message::InfoAnchor(size) => self.info_anchor = size.width,
             Message::Navigate(dir) => {
                 let next = self
                     .info
@@ -338,18 +373,44 @@ impl App {
                     return Task::done(Message::Load(path));
                 }
             }
-            Message::Timeline(TimelineEvent::Trim(t)) => self.trim = t,
-            Message::Timeline(TimelineEvent::Seek(t)) => self.seek(t, false),
+            // Show the frame under the dragged handle: the first frame for the
+            // start, the last frame inside the range for the end.
+            Message::Timeline(TimelineEvent::Trim(t)) => {
+                self.trim_drag_origin.get_or_insert(self.position);
+                self.seeking = true;
+                let start_moved = t.start != self.trim.start;
+                self.set_trim(t.start, t.end);
+                let target = if start_moved {
+                    self.trim.start
+                } else {
+                    self.trim.end - self.frame()
+                };
+                self.seek(target);
+            }
+            Message::Timeline(TimelineEvent::Seek(t)) => {
+                self.seeking = true;
+                self.seek(t);
+            }
+            // seek() clamps into the new range: an origin outside of it lands on
+            // the first or last frame.
+            Message::Timeline(TimelineEvent::Release) => {
+                self.seeking = false;
+                if let Some(origin) = self.trim_drag_origin.take() {
+                    self.seek(origin);
+                }
+            }
             Message::StartText(s) => self.start_text = Some(s),
             Message::EndText(s) => self.end_text = Some(s),
             Message::CommitStart => {
                 if let Some(v) = self.start_text.take().as_deref().and_then(parse_time) {
-                    self.trim.start = v.clamp(0.0, self.trim.end - 0.05);
+                    self.set_trim(v, self.trim.end);
+                    self.seek(self.trim.start);
                 }
             }
             Message::CommitEnd => {
                 if let Some(v) = self.end_text.take().as_deref().and_then(parse_time) {
-                    self.trim.end = v.clamp(self.trim.start + 0.05, self.duration());
+                    self.set_trim(self.trim.start, v);
+                    self.seek(self.trim.end - self.frame());
                 }
             }
             Message::ToggleExportMenu => self.export_menu = !self.export_menu,
@@ -482,8 +543,8 @@ impl App {
         let msg = if let Some(choice) = self.delete_dialog {
             match key.as_ref() {
                 Key::Named(Named::Escape) => Message::CancelDelete,
-                Key::Named(Named::ArrowLeft) => Message::DeleteChoice(DeleteChoice::Delete),
-                Key::Named(Named::ArrowRight) => Message::DeleteChoice(DeleteChoice::Cancel),
+                Key::Named(Named::ArrowLeft) => Message::DeleteChoice(DeleteChoice::Cancel),
+                Key::Named(Named::ArrowRight) => Message::DeleteChoice(DeleteChoice::Delete),
                 Key::Named(Named::Enter) if choice == DeleteChoice::Delete => {
                     Message::ConfirmDelete
                 }
@@ -511,9 +572,10 @@ impl App {
     pub fn view(&self) -> Element<'_, Message> {
         let body: Element<_> = match (&self.video, &self.info) {
             (Some(video), Some(info)) => {
-                let mut col = column![self.stage(video)].spacing(12);
+                // The video runs edge to edge; only the trim panel keeps a margin.
+                let mut col = column![self.stage(video)];
                 if self.trim_open && !self.fullscreen {
-                    col = col.push(self.trim_panel(info));
+                    col = col.push(container(self.trim_panel(info)).padding(16));
                 }
                 col.into()
             }
@@ -521,22 +583,20 @@ impl App {
             _ => self.empty_state(),
         };
 
-        let padding = if self.fullscreen { 0 } else { 16 };
-        let mut layers = stack![container(body)
-            .padding(padding)
-            .width(Length::Fill)
-            .height(Length::Fill)];
+        let mut layers = stack![container(body).width(Length::Fill).height(Length::Fill)];
         // Popovers close on any click outside of them, like the old web UI.
         let dismiss =
             |msg| mouse_area(space().width(Length::Fill).height(Length::Fill)).on_press(msg);
         if self.info_open && !self.fullscreen {
             if let Some(info) = &self.info {
                 layers = layers.push(dismiss(Message::ToggleInfo));
-                layers = layers.push(
-                    container(info_popover(info))
-                        .align_right(Length::Fill)
-                        .padding([8, 16]),
-                );
+                // 16 = topbar padding, 2 = row spacing before the Info button.
+                let under_button = iced::Padding {
+                    top: 4.0,
+                    left: 16.0 + self.info_anchor + 2.0,
+                    ..Default::default()
+                };
+                layers = layers.push(container(info_popover(info)).padding(under_button));
             }
         }
         if self.export_menu && self.trim_open && !self.fullscreen {
@@ -601,16 +661,17 @@ impl App {
                 .style(theme::tab(active))
                 .on_press_maybe(enabled.then_some(msg))
         };
-        let icon_tab = |ic: Icon, msg: Message, danger: bool| {
+        let icon_tab = |ic: Icon, label: &'static str, msg: Message, danger: bool| {
             let color = if has { TX_2 } else { TX_3.scale_alpha(0.55) };
             let b = button(icon(ic, 16.0, color))
                 .padding(8)
                 .on_press_maybe(has.then_some(msg));
-            if danger {
+            let b = if danger {
                 b.style(theme::tab_danger)
             } else {
                 b.style(theme::tab(false))
-            }
+            };
+            tip(b, label, tooltip::Position::Bottom)
         };
 
         let brand = row![
@@ -618,7 +679,7 @@ impl App {
             text("Video").size(17).font(SEMIBOLD).color(A_FILL)
         ];
 
-        let bar = row![
+        let before_info = row![
             brand,
             space::horizontal().width(12),
             tab(Icon::Folder, "Datei öffnen", false, Message::OpenFile, true),
@@ -629,6 +690,14 @@ impl App {
                 Message::ToggleTrim,
                 has
             ),
+        ]
+        .spacing(2)
+        .align_y(Alignment::Center);
+
+        let bar = row![
+            sensor(before_info)
+                .on_show(Message::InfoAnchor)
+                .on_resize(Message::InfoAnchor),
             tab(Icon::Info, "Info", self.info_open, Message::ToggleInfo, has),
             tab(
                 Icon::Camera,
@@ -637,9 +706,19 @@ impl App {
                 Message::SaveFrame,
                 has
             ),
-            icon_tab(Icon::SkipBack, Message::Navigate(-1), false),
-            icon_tab(Icon::SkipFwd, Message::Navigate(1), false),
-            icon_tab(Icon::Trash, Message::AskDelete, true),
+            icon_tab(
+                Icon::SkipBack,
+                "Vorheriges Video",
+                Message::Navigate(-1),
+                false
+            ),
+            icon_tab(Icon::SkipFwd, "Nächstes Video", Message::Navigate(1), false),
+            icon_tab(
+                Icon::Trash,
+                "Video löschen (Entf)",
+                Message::AskDelete,
+                true
+            ),
         ]
         .spacing(2)
         .align_y(Alignment::Center);
@@ -660,12 +739,13 @@ impl App {
             .on_end_of_stream(Message::EndOfStream);
 
         let player = mouse_area(
+            // No backdrop: letterbox space shows the page surface instead of black
+            // bars. Only fullscreen keeps black, as players usually do.
             container(player)
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .style(|_| container::Style {
-                    background: Some(iced::Color::BLACK.into()),
-                    border: iced::border::rounded(if self.fullscreen { 0.0 } else { R_2 }),
+                    background: self.fullscreen.then_some(iced::Color::BLACK.into()),
                     ..Default::default()
                 }),
         )
@@ -677,31 +757,37 @@ impl App {
             self.controls_hovered || video.paused() || Instant::now() < self.controls_until;
         let mut layers = stack![player];
         if visible {
-            let bar = mouse_area(self.controls(video))
-                .on_enter(Message::ControlsHover(true))
-                .on_exit(Message::ControlsHover(false));
+            // opaque: clicks on the bar's background must not reach the video (play/pause).
+            let bar = opaque(
+                mouse_area(self.controls(video))
+                    .on_enter(Message::ControlsHover(true))
+                    .on_exit(Message::ControlsHover(false)),
+            );
             layers = layers.push(container(bar).align_bottom(Length::Fill).padding(16));
         }
         layers.into()
     }
 
     fn controls<'a>(&'a self, video: &'a Video) -> Element<'a, Message> {
-        let ctrl = |ic: Icon, size: f32, msg: Message| {
-            button(icon(ic, size, TX))
+        let ctrl = |ic: Icon, label: &'static str, msg: Message| {
+            let b = button(icon(ic, 18.0, TX))
                 .padding(8)
                 .style(theme::ghost)
-                .on_press(msg)
+                .on_press(msg);
+            tip(b, label, tooltip::Position::Top)
         };
-        let duration = self.duration().max(0.01);
+        // While trimming the bar spans only the trim range, stretched to full width.
+        let (from, to) = if self.trim_open {
+            (self.trim.start, self.trim.end)
+        } else {
+            (0.0, self.duration())
+        };
+        let to = to.max(from + 0.01);
 
-        let seek = slider(
-            0.0..=duration,
-            self.position.min(duration),
-            Message::SeekDrag,
-        )
-        .step(0.01)
-        .on_release(Message::SeekRelease)
-        .style(theme::seek_slider);
+        let seek = slider(from..=to, self.position.clamp(from, to), Message::SeekDrag)
+            .step(0.001)
+            .on_release(Message::SeekRelease)
+            .style(theme::seek_slider);
 
         let play_icon = if video.paused() || video.eos() {
             Icon::Play
@@ -714,22 +800,26 @@ impl App {
             .on_press(Message::TogglePlay);
 
         let center_group = row![
-            ctrl(Icon::FrameBack, 18.0, Message::StepFrame(-1)),
-            ctrl(Icon::SkipBack, 18.0, Message::Skip(-5.0)),
+            ctrl(
+                Icon::FrameBack,
+                "Vorheriger Frame (,)",
+                Message::StepFrame(-1)
+            ),
+            ctrl(Icon::SkipBack, "5 s zurück (←)", Message::Skip(-5.0)),
             play,
-            ctrl(Icon::SkipFwd, 18.0, Message::Skip(5.0)),
-            ctrl(Icon::FrameFwd, 18.0, Message::StepFrame(1)),
+            ctrl(Icon::SkipFwd, "5 s vor (→)", Message::Skip(5.0)),
+            ctrl(Icon::FrameFwd, "Nächster Frame (.)", Message::StepFrame(1)),
         ]
         .spacing(4)
         .align_y(Alignment::Center);
 
         let time = row![
-            text(format_time(self.position, false))
+            text(format_time(self.position, self.trim_open))
                 .font(MONO)
                 .size(13)
                 .color(TX),
             text(" / ").font(MONO).size(13).color(TX_3),
-            text(format_time(self.duration(), false))
+            text(format_time(to, self.trim_open))
                 .font(MONO)
                 .size(13)
                 .color(TX_3),
@@ -751,9 +841,13 @@ impl App {
         let right = row![
             time,
             space::horizontal().width(8),
-            ctrl(mute_icon, 18.0, Message::ToggleMute),
+            ctrl(mute_icon, "Ton an/aus", Message::ToggleMute),
             volume,
-            ctrl(Icon::Fullscreen, 18.0, Message::ToggleFullscreen),
+            ctrl(
+                Icon::Fullscreen,
+                "Vollbild (F11)",
+                Message::ToggleFullscreen
+            ),
         ]
         .spacing(6)
         .align_y(Alignment::Center);
@@ -819,7 +913,7 @@ impl App {
                 Message::CommitEnd
             ),
             text("•").size(15).color(TX_3),
-            text(format_time(self.trim.end - self.trim.start, false))
+            text(format_time(self.trim.end - self.trim.start, true))
                 .font(MONO)
                 .size(13)
                 .color(TX),
@@ -1038,6 +1132,21 @@ fn info_popover(info: &VideoInfo) -> Element<'_, Message> {
     opaque(container(col).padding(16).style(theme::sheet))
 }
 
+fn snap_to_frame(sec: f64, frame: f64) -> f64 {
+    (sec / frame).round() * frame
+}
+
+fn tip<'a>(
+    content: impl Into<Element<'a, Message>>,
+    label: &'a str,
+    position: tooltip::Position,
+) -> Element<'a, Message> {
+    let bubble = container(text(label).size(13).color(TX))
+        .padding([4, 8])
+        .style(theme::tooltip);
+    tooltip(content, bubble, position).gap(6).into()
+}
+
 fn delete_dialog(choice: DeleteChoice, file_name: &str) -> Element<'_, Message> {
     let del = button(text("Löschen").size(14))
         .padding([8, 18])
@@ -1054,13 +1163,28 @@ fn delete_dialog(choice: DeleteChoice, file_name: &str) -> Element<'_, Message> 
                 .size(15)
                 .color(TX_2),
             space::vertical().height(8),
-            row![del, cancel].spacing(10),
+            row![space::horizontal(), cancel, del].spacing(10),
         ]
         .spacing(8)
-        .max_width(420),
+        .width(420),
     )
     .padding(22)
     .style(theme::sheet);
 
     opaque(mouse_area(center(opaque(dialog)).style(theme::scrim)).on_press(Message::CancelDelete))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::snap_to_frame;
+
+    #[test]
+    fn snaps_to_nearest_frame_start() {
+        let frame = 1.0 / 30.0;
+        assert!((snap_to_frame(0.222, frame) - 7.0 * frame).abs() < 1e-9);
+        assert!((snap_to_frame(0.856, frame) - 26.0 * frame).abs() < 1e-9);
+        assert_eq!(snap_to_frame(0.0, frame), 0.0);
+        let ntsc = 1001.0 / 30000.0;
+        assert!((snap_to_frame(10.0, ntsc) - 300.0 * ntsc).abs() < 1e-9);
+    }
 }
