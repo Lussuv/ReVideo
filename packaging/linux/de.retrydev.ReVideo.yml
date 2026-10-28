@@ -28,6 +28,20 @@ modules:
         url: https://code.videolan.org/videolan/x264.git
         commit: b35605ace3ddf7c1a5d67a2eb553f034aef41d55
 
+  # AV1 decoding for ffmpeg; ffmpeg has no software AV1 decoder of its own.
+  - name: dav1d
+    buildsystem: meson
+    config-opts:
+      - -Ddefault_library=static
+      - -Denable_tools=false
+      - -Denable_tests=false
+    cleanup:
+      - '*'
+    sources:
+      - type: archive
+        url: https://downloads.videolan.org/pub/videolan/dav1d/1.5.4/dav1d-1.5.4.tar.xz
+        sha256: 686616b7c69eb88d44459391ab25cac13b6647a3b288835c5784e71c1514a5c5
+
   # Static ffmpeg/ffprobe CLI only: shared libs in /app/lib would shadow the
   # runtime's libav* that gst-libav is built against.
   - name: ffmpeg
@@ -36,6 +50,8 @@ modules:
       - --enable-static
       - --enable-gpl
       - --enable-libx264
+      - --enable-libdav1d
+      - --pkg-config-flags=--static
       - --disable-doc
       - --disable-ffplay
       - --disable-debug

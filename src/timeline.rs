@@ -1,5 +1,6 @@
 use crate::format::format_time;
 use crate::theme::*;
+use iced::alignment::Horizontal;
 use iced::mouse::{self, Cursor};
 use iced::widget::canvas::{self, Action, Event, Frame, Geometry, Path, Text};
 use iced::{Color, Point, Rectangle, Renderer, Size, Theme};
@@ -7,6 +8,10 @@ use iced::{Color, Point, Rectangle, Renderer, Size, Theme};
 /// The thumbnail strip underneath the canvas must use the same insets.
 pub const TICKS_H: f32 = 20.0;
 pub const HANDLE_W: f32 = 10.0;
+/// "00:00:00" in 11 px mono is ~55 px wide.
+const LABEL_HALF: f32 = 28.0;
+/// Minimum distance between tick positions; leaves room between labels.
+const LABEL_GAP: f32 = 90.0;
 const GRAB: f32 = 12.0;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -134,23 +139,35 @@ impl canvas::Program<TimelineEvent> for Timeline {
         let track = Self::track(bounds);
 
         // Tick labels
-        let step = pick_step(self.duration);
+        let step = pick_step(self.duration, track.width);
+        let right = track.x + track.width;
         let mut s = 0.0;
+        let mut prev_end = f32::NEG_INFINITY;
         while self.duration > 0.0 && s <= self.duration + 0.001 {
+            let t = s;
+            s += step;
+            // Labels at the edges are aligned flush instead of overflowing the track.
+            let x = self.x(t, track);
+            let (anchor, align, left) = if x - LABEL_HALF < track.x {
+                (track.x, Horizontal::Left, track.x)
+            } else if x + LABEL_HALF > right {
+                (right, Horizontal::Right, right - 2.0 * LABEL_HALF)
+            } else {
+                (x, Horizontal::Center, x - LABEL_HALF)
+            };
+            if left < prev_end + 8.0 {
+                continue;
+            }
+            prev_end = left + 2.0 * LABEL_HALF;
             f.fill_text(Text {
-                content: format_time(s, false),
-                position: Point::new(
-                    self.x(s, track)
-                        .clamp(track.x + 28.0, track.x + track.width - 28.0),
-                    2.0,
-                ),
+                content: format_time(t, false),
+                position: Point::new(anchor, 2.0),
                 color: TX_3,
                 size: 11.0.into(),
                 font: MONO,
-                align_x: iced::alignment::Horizontal::Center.into(),
+                align_x: align.into(),
                 ..Text::default()
             });
-            s += step;
         }
 
         // Shade outside the trim range
@@ -229,12 +246,14 @@ impl canvas::Program<TimelineEvent> for Timeline {
     }
 }
 
-fn pick_step(dur: f64) -> f64 {
-    match dur {
-        d if d <= 30.0 => 5.0,
-        d if d <= 120.0 => 15.0,
-        d if d <= 600.0 => 60.0,
-        d if d <= 3600.0 => 300.0,
-        _ => 600.0,
-    }
+/// Smallest "round" step that keeps tick labels at least `LABEL_GAP` apart.
+fn pick_step(duration: f64, width: f32) -> f64 {
+    const STEPS: [f64; 14] = [
+        1.0, 2.0, 5.0, 10.0, 15.0, 30.0, 60.0, 120.0, 300.0, 600.0, 900.0, 1800.0, 3600.0, 7200.0,
+    ];
+    let px_per_sec = width as f64 / duration.max(0.001);
+    STEPS
+        .into_iter()
+        .find(|step| step * px_per_sec >= LABEL_GAP as f64)
+        .unwrap_or(7200.0)
 }

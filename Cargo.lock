@@ -1832,8 +1832,6 @@ dependencies = [
 [[package]]
 name = "iced_video_player"
 version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b836dad1567026b92b5f3eba21e3e9bea47b6b66392303bb07d91e82bb7401a"
 dependencies = [
  "glib",
  "gstreamer",

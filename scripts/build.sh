@@ -14,6 +14,7 @@ build_linux() {
         --repo=build/flatpak-repo build/flatpak "packaging/linux/$APP_ID.yml"
     flatpak build-bundle build/flatpak-repo "dist/ReVideo-$VERSION-x86_64.flatpak" "$APP_ID" \
         --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo
+    ls -lh "dist/ReVideo-$VERSION-x86_64.flatpak"
 }
 
 build_windows() {
@@ -27,6 +28,7 @@ build_windows() {
         "$sysroot/ucrt64" build/windows/stage
     makensis -V2 -DVERSION="$VERSION" -DSTAGE="$PWD/build/windows/stage" \
         -DOUTFILE="$PWD/dist/ReVideo-$VERSION-setup.exe" packaging/windows/installer.nsi
+    ls -lh "dist/ReVideo-$VERSION-setup.exe"
 }
 
 case "${1:-all}" in
@@ -35,4 +37,3 @@ case "${1:-all}" in
     all) build_linux; build_windows ;;
     *) echo "Aufruf: $0 [linux|windows|all]" >&2; exit 1 ;;
 esac
-ls -lh dist/

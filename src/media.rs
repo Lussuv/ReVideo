@@ -203,6 +203,38 @@ impl Seeker {
     }
 }
 
+/// A freshly opened video on its way to the UI; messages must be `Clone`, the
+/// pipeline is not, so it is handed over once through [`Opened::take`].
+#[derive(Clone)]
+pub struct Opened(std::sync::Arc<std::sync::Mutex<Option<(iced_video_player::Video, bool)>>>);
+
+impl Opened {
+    pub fn take(&self) -> Option<(iced_video_player::Video, bool)> {
+        self.0.lock().ok()?.take()
+    }
+}
+
+impl std::fmt::Debug for Opened {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Opened")
+    }
+}
+
+/// Probes the file and builds the playback pipeline concurrently, off the UI
+/// thread: building the pipeline waits for the first decoded frame.
+pub async fn open(path: PathBuf) -> Result<(VideoInfo, Opened), String> {
+    let for_gst = path.clone();
+    let (info, video) = tokio::join!(
+        video_info(path),
+        tokio::task::spawn_blocking(move || open_video(&for_gst))
+    );
+    let video = video.map_err(|e| e.to_string())??;
+    Ok((
+        info?,
+        Opened(std::sync::Arc::new(std::sync::Mutex::new(Some(video)))),
+    ))
+}
+
 pub fn move_to_trash(path: &Path) -> Result<(), String> {
     #[cfg(target_os = "linux")]
     if Path::new("/.flatpak-info").exists() {
@@ -369,6 +401,9 @@ async fn run_discord(
             path_arg(&passlog),
             "-pass".into(),
             pass.into(),
+            // In both passes: x264 refuses a second pass with another bit depth (10-bit sources).
+            "-pix_fmt".into(),
+            "yuv420p".into(),
         ]
     };
 
@@ -382,7 +417,6 @@ async fn run_discord(
     ffmpeg::run_ffmpeg_streaming(pass1, on_tick_1).await?;
 
     let mut pass2 = common("2");
-    pass2.extend(["-pix_fmt".into(), "yuv420p".into()]);
     if has_audio {
         pass2.extend([
             "-c:a".into(),
@@ -426,30 +460,35 @@ pub async fn thumbnails(path: PathBuf, duration: f64, count: u32) -> Vec<PathBuf
         }
         let target = dir.join(format!("thumb_{:03}.jpg", i + 1));
         if !target.exists() {
-            // `-ss` before `-i` seeks to the nearest keyframe instead of
-            // decoding the whole file up to each thumbnail.
             let ts = duration * (i as f64 + 0.5) / count as f64;
-            let args = vec![
-                "-y".into(),
-                "-v".into(),
-                "error".into(),
-                "-ss".into(),
-                secs(ts),
-                "-i".into(),
-                path_arg(&path),
-                "-frames:v".into(),
-                "1".into(),
-                "-vf".into(),
-                "scale=160:-2".into(),
-                "-q:v".into(),
-                "5".into(),
-                "-an".into(),
-                "-sn".into(),
-                path_arg(&target),
-            ];
-            // A seek past the last decodable frame yields nothing; skip that slot.
-            if ffmpeg::run_ffmpeg(args).await.is_err() {
-                continue;
+            // Fast path: decode just the keyframe before `ts`. Single-threaded on purpose,
+            // frame threading makes the decoder fill a frame per core before the first
+            // one comes out (~100 ms instead of ~600 ms per 4K thumbnail).
+            let fast = ["-noaccurate_seek", "-threads", "1", "-skip_frame", "nokey"];
+            // Without a keyframe before `ts` (short clips, long GOP) the fast path
+            // yields nothing; decode up to `ts` then.
+            for extra in [&fast[..], &[]] {
+                let mut args: Vec<String> = vec!["-y".into(), "-v".into(), "error".into()];
+                args.extend(extra.iter().map(|a| a.to_string()));
+                args.extend([
+                    "-ss".into(),
+                    secs(ts),
+                    "-i".into(),
+                    path_arg(&path),
+                    "-frames:v".into(),
+                    "1".into(),
+                    "-vf".into(),
+                    "scale=160:-2".into(),
+                    "-q:v".into(),
+                    "5".into(),
+                    "-an".into(),
+                    "-sn".into(),
+                    path_arg(&target),
+                ]);
+                // A seek past the last decodable frame yields nothing; skip that slot.
+                if ffmpeg::run_ffmpeg(args).await.is_ok() && target.exists() {
+                    break;
+                }
             }
         }
         if target.exists() {
@@ -582,6 +621,59 @@ mod tests {
             std::fs::metadata(&src).unwrap().len() > 10_000_000,
             "source must exceed the Discord limit"
         );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Mirrors a HandBrake AV1 10-bit / Opus 5.1 MP4, which needs libdav1d in ffmpeg.
+    /// Needs ffmpeg with libsvtav1 + libdav1d on PATH: `cargo test -- --ignored`.
+    #[test]
+    #[ignore]
+    fn discord_export_from_av1_10bit() {
+        use iced::futures::StreamExt;
+        let dir = std::env::temp_dir().join(format!("revideo-av1-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let src = dir.join("src.mp4");
+        let ok = std::process::Command::new("ffmpeg")
+            .args(["-v", "error", "-y", "-f", "lavfi", "-i"])
+            .arg("testsrc2=size=1920x1080:rate=24000/1001")
+            .args(["-f", "lavfi", "-i", "sine", "-t", "6"])
+            .args([
+                "-c:v",
+                "libsvtav1",
+                "-preset",
+                "12",
+                "-pix_fmt",
+                "yuv420p10le",
+            ])
+            .args(["-c:a", "libopus", "-ac", "6", "-mapping_family", "1"])
+            .arg(&src)
+            .status()
+            .unwrap();
+        assert!(ok.success());
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let out = dir.join("discord.mp4");
+        let items: Vec<_> = rt.block_on(
+            export(
+                src.clone(),
+                out.clone(),
+                1.0,
+                5.0,
+                ExportPreset::DiscordNonNitro,
+            )
+            .collect(),
+        );
+        assert!(items.iter().all(Result::is_ok), "{items:?}");
+        let probe = rt.block_on(ffmpeg::probe(&out)).unwrap();
+        let video = probe.video_stream().unwrap();
+        assert_eq!(video.codec_name.as_deref(), Some("h264"));
+        assert!((probe.duration() - 4.0).abs() < 0.3, "{}", probe.duration());
+
+        let thumbs = rt.block_on(thumbnails(src, 6.0, 3));
+        assert_eq!(thumbs.len(), 3, "thumbnails from AV1 source");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

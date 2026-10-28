@@ -22,7 +22,7 @@ const TRIM_PANEL_H: f32 = 164.0;
 pub enum Message {
     OpenFile,
     Load(PathBuf),
-    InfoLoaded(u64, Result<VideoInfo, String>),
+    Opened(u64, Result<(VideoInfo, media::Opened), String>),
     Thumbnails(u64, Vec<PathBuf>),
     NewFrame,
     EndOfStream,
@@ -76,8 +76,11 @@ pub struct App {
     load_id: u64,
     loading: bool,
     thumbnails: Vec<image::Handle>,
+    /// Thumbnails are only generated once the trim panel is opened.
+    thumbs_requested: bool,
     position: f64,
     seeking: bool,
+    seeked_since_pause: bool,
     /// Playhead position before a trim handle drag; restored on release.
     trim_drag_origin: Option<f64>,
     volume: f64,
@@ -111,8 +114,10 @@ impl App {
             load_id: 0,
             loading: false,
             thumbnails: Vec::new(),
+            thumbs_requested: false,
             position: 0.0,
             seeking: false,
+            seeked_since_pause: false,
             trim_drag_origin: None,
             volume: 0.8,
             muted: false,
@@ -184,9 +189,33 @@ impl App {
             );
         }
         if let Some(seeker) = &self.seeker {
-            seeker.seek(sec);
+            // Aim at the middle of the frame: the exact start, rounded down to whole
+            // nanoseconds, lies just before it and shows the previous frame.
+            seeker.seek(sec + self.frame() / 2.0);
         }
+        self.seeked_since_pause = true;
         self.position = sec;
+    }
+
+    fn pause(&mut self) {
+        if let Some(video) = &mut self.video {
+            if !video.paused() {
+                video.set_paused(true);
+                self.seeked_since_pause = false;
+            }
+        }
+    }
+
+    /// Time of the frame a step starts from. Right after pausing the pipeline still
+    /// delivers one more frame and `position` lags; read the shown frame then. After a
+    /// seek, `position` holds its target, which the screen may not show yet.
+    fn step_origin(&self) -> f64 {
+        match &self.video {
+            Some(video) if video.paused() && !self.seeked_since_pause => video
+                .frame_position()
+                .map_or(self.position, |t| self.snap(t.as_secs_f64())),
+            _ => self.position,
+        }
     }
 
     fn show_controls(&mut self) {
@@ -200,6 +229,7 @@ impl App {
         self.seeker = None;
         self.info = None;
         self.thumbnails.clear();
+        self.thumbs_requested = false;
         self.position = 0.0;
         self.trim_open = false;
         self.info_open = false;
@@ -231,18 +261,21 @@ impl App {
                 self.loading = true;
                 self.error = None;
                 let id = self.load_id;
-                return Task::perform(media::video_info(path), move |r| Message::InfoLoaded(id, r));
+                return Task::perform(media::open(path), move |r| Message::Opened(id, r));
             }
-            Message::InfoLoaded(id, result) if id == self.load_id => {
+            Message::Opened(id, result) if id == self.load_id => {
                 self.loading = false;
-                let info = match result {
-                    Ok(info) => info,
+                let (info, opened) = match result {
+                    Ok(r) => r,
                     Err(e) => {
                         self.error = Some(e);
                         return Task::none();
                     }
                 };
-                match media::open_video(&info.path) {
+                match opened
+                    .take()
+                    .ok_or_else(|| "Video bereits übernommen".to_string())
+                {
                     Ok((mut video, silent)) => {
                         if silent {
                             self.error =
@@ -265,11 +298,9 @@ impl App {
                     end: info.duration_sec,
                 };
                 self.show_controls();
-                let thumbs = media::thumbnails(info.path.clone(), info.duration_sec, THUMB_COUNT);
                 self.info = Some(info);
-                return Task::perform(thumbs, move |t| Message::Thumbnails(id, t));
             }
-            Message::InfoLoaded(..) => {}
+            Message::Opened(..) => {}
             Message::Thumbnails(id, paths) if id == self.load_id => {
                 self.thumbnails = paths.into_iter().map(image::Handle::from_path).collect();
             }
@@ -306,8 +337,10 @@ impl App {
                         if pos < self.duration() - self.frame() {
                             self.seek(pos);
                         }
+                    } else if video.paused() {
+                        video.set_paused(false);
                     } else {
-                        video.set_paused(!video.paused());
+                        self.pause();
                     }
                 }
                 self.show_controls();
@@ -318,10 +351,8 @@ impl App {
                 self.show_controls();
             }
             Message::StepFrame(dir) => {
-                if let Some(video) = &mut self.video {
-                    video.set_paused(true);
-                }
-                let target = self.position + dir as f64 * self.frame();
+                self.pause();
+                let target = self.step_origin() + dir as f64 * self.frame();
                 self.seek(target);
             }
             // Seeks on every move so the picture follows the handle.
@@ -361,7 +392,20 @@ impl App {
                 self.show_controls();
             }
             Message::Tick => {}
-            Message::ToggleTrim => self.trim_open = !self.trim_open,
+            Message::ToggleTrim => {
+                self.trim_open = !self.trim_open;
+                if let Some(info) = self
+                    .info
+                    .as_ref()
+                    .filter(|_| self.trim_open && !self.thumbs_requested)
+                {
+                    self.thumbs_requested = true;
+                    let id = self.load_id;
+                    let thumbs =
+                        media::thumbnails(info.path.clone(), info.duration_sec, THUMB_COUNT);
+                    return Task::perform(thumbs, move |t| Message::Thumbnails(id, t));
+                }
+            }
             Message::ToggleInfo => self.info_open = !self.info_open,
             Message::InfoAnchor(size) => self.info_anchor = size.width,
             Message::Navigate(dir) => {
