@@ -80,10 +80,10 @@ pub struct App {
     load_id: u64,
     loading: bool,
     thumbnails: Vec<image::Handle>,
-    /// Thumbnails are only generated once the trim panel is opened.
-    thumbs_requested: bool,
     position: f64,
     seeking: bool,
+    /// Set while the mouse holds the seek bar or timeline: whether to resume on release.
+    resume_after_drag: Option<bool>,
     seeked_since_pause: bool,
     /// Playhead position before a trim handle drag; restored on release.
     trim_drag_origin: Option<f64>,
@@ -121,9 +121,9 @@ impl App {
             load_id: 0,
             loading: false,
             thumbnails: Vec::new(),
-            thumbs_requested: false,
             position: 0.0,
             seeking: false,
+            resume_after_drag: None,
             seeked_since_pause: false,
             trim_drag_origin: None,
             volume: 0.8,
@@ -228,6 +228,24 @@ impl App {
         }
     }
 
+    /// Keeps the video paused while the mouse holds the seek bar or timeline.
+    fn begin_drag(&mut self) {
+        self.seeking = true;
+        if self.resume_after_drag.is_none() {
+            self.resume_after_drag = Some(self.video.as_ref().is_some_and(|v| !v.paused()));
+            self.pause();
+        }
+    }
+
+    fn end_drag(&mut self) {
+        self.seeking = false;
+        if self.resume_after_drag.take() == Some(true) {
+            if let Some(video) = &mut self.video {
+                video.set_paused(false);
+            }
+        }
+    }
+
     fn show_controls(&mut self) {
         self.controls_until = Instant::now() + CONTROLS_HIDE_AFTER;
     }
@@ -239,7 +257,6 @@ impl App {
         self.seeker = None;
         self.info = None;
         self.thumbnails.clear();
-        self.thumbs_requested = false;
         self.position = 0.0;
         self.trim_open = false;
         self.info_open = false;
@@ -308,7 +325,10 @@ impl App {
                     end: info.duration_sec,
                 };
                 self.show_controls();
+                let id = self.load_id;
+                let thumbs = media::thumbnails(info.path.clone(), info.duration_sec, THUMB_COUNT);
                 self.info = Some(info);
+                return Task::perform(thumbs, move |t| Message::Thumbnails(id, t));
             }
             Message::Opened(..) => {}
             Message::Thumbnails(id, paths) if id == self.load_id => {
@@ -367,10 +387,10 @@ impl App {
             }
             // Seeks on every move so the picture follows the handle.
             Message::SeekDrag(sec) => {
-                self.seeking = true;
+                self.begin_drag();
                 self.seek(sec);
             }
-            Message::SeekRelease => self.seeking = false,
+            Message::SeekRelease => self.end_drag(),
             Message::Volume(v) => {
                 self.volume = v;
                 if v > 0.0 {
@@ -402,20 +422,7 @@ impl App {
                 self.show_controls();
             }
             Message::Tick => {}
-            Message::ToggleTrim => {
-                self.trim_open = !self.trim_open;
-                if let Some(info) = self
-                    .info
-                    .as_ref()
-                    .filter(|_| self.trim_open && !self.thumbs_requested)
-                {
-                    self.thumbs_requested = true;
-                    let id = self.load_id;
-                    let thumbs =
-                        media::thumbnails(info.path.clone(), info.duration_sec, THUMB_COUNT);
-                    return Task::perform(thumbs, move |t| Message::Thumbnails(id, t));
-                }
-            }
+            Message::ToggleTrim => self.trim_open = !self.trim_open,
             Message::ToggleInfo => self.info_open = !self.info_open,
             Message::InfoAnchor(size) => self.info_anchor = size.width,
             Message::Navigate(dir) => {
@@ -431,7 +438,7 @@ impl App {
             // start, the last frame inside the range for the end.
             Message::Timeline(TimelineEvent::Trim(t)) => {
                 self.trim_drag_origin.get_or_insert(self.position);
-                self.seeking = true;
+                self.begin_drag();
                 let start_moved = t.start != self.trim.start;
                 self.set_trim(t.start, t.end);
                 let target = if start_moved {
@@ -442,16 +449,16 @@ impl App {
                 self.seek(target);
             }
             Message::Timeline(TimelineEvent::Seek(t)) => {
-                self.seeking = true;
+                self.begin_drag();
                 self.seek(t);
             }
             // seek() clamps into the new range: an origin outside of it lands on
             // the first or last frame.
             Message::Timeline(TimelineEvent::Release) => {
-                self.seeking = false;
                 if let Some(origin) = self.trim_drag_origin.take() {
                     self.seek(origin);
                 }
+                self.end_drag();
             }
             Message::StartText(s) => self.start_text = Some(s),
             Message::EndText(s) => self.end_text = Some(s),
