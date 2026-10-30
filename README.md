@@ -71,6 +71,7 @@ Version in `CMakeLists.txt` (`project(ReVideo VERSION …)`) und
 GitHub Actions ([release.yml](.github/workflows/release.yml)) baut dann Flatpak und
 Installer und legt das Release `v<version>` in `ReVideo-releases` an.
 
+Ist ein Lauf gescheitert, lässt er sich unter Actions → Release → „Run workflow“ neu starten.
 Gebaut wird nur bei neuer Major- oder Minor-Version (`3.4.0`, `4.0.0`). Patch-Versionen
 (`3.4.1`) und schon veröffentlichte Versionen überspringt der Workflow. Voraussetzung ist
 das Secret `RELEASES_TOKEN` im Code-Repo: ein Fine-grained Token nur für `ReVideo-releases`
@@ -80,9 +81,11 @@ mit „Contents: Read and write“.
 `codecs-extra`). libass, libplacebo und mpv werden ins Flatpak gebaut, dazu eine
 eigenständige ffmpeg mit x264 und dav1d für den Export.
 
-**Windows:** [scripts/build-windows.sh](scripts/build-windows.sh) läuft in MSYS2 (UCRT64)
-auf einem Windows-Runner: ffmpeg und mpv als LGPL-DLLs, die Export-`ffmpeg.exe` separat,
-Qt per `windeployqt6`, die übrigen DLLs, Lizenzen und Quellpakete per
+**Windows:** läuft in MSYS2 (UCRT64) auf einem Windows-Runner.
+[scripts/build-windows-deps.sh](scripts/build-windows-deps.sh) baut ffmpeg und mpv als
+LGPL-DLLs und die Export-`ffmpeg.exe` separat (in der CI gecacht);
+[scripts/build-windows.sh](scripts/build-windows.sh) baut die App, holt Qt per
+`windeployqt6` und die übrigen DLLs, Lizenzen und Quellpakete per
 [scripts/stage-windows.py](scripts/stage-windows.py). Der Installer arbeitet pro Benutzer
 ohne Admin-Rechte und trägt ReVideo unter „Öffnen mit“ ein.
 

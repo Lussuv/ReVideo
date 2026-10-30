@@ -11,6 +11,8 @@ on:
   push:
     branches: [main]
     paths: [CMakeLists.txt]
+  # Manuell, z. B. wenn ein Release-Lauf gescheitert ist (Actions → Release → Run workflow).
+  workflow_dispatch:
 
 # Zwei schnelle Pushes sollen nicht beide dieselbe Version bauen.
 concurrency: release
@@ -67,7 +69,7 @@ jobs:
             ReVideo-${{ needs.version.outputs.version }}-linux-sources.tar
 
   # MSYS2 UCRT64 auf einem Windows-Runner; ffmpeg und mpv werden dort als LGPL gebaut,
-  # siehe scripts/build-windows.sh.
+  # siehe scripts/build-windows-deps.sh und scripts/build-windows.sh.
   windows:
     needs: version
     if: needs.version.outputs.release == 'true'
@@ -86,6 +88,27 @@ jobs:
             toolchain:p cmake:p ninja:p meson:p nasm:p pkgconf:p python:p
             qt6-base:p qt6-declarative:p libass:p libplacebo:p dav1d:p x264:p
             ffnvcodec-headers:p nsis:p
+      # ffmpeg und mpv (~45 min) nur neu bauen, wenn sich das Skript oder ein MSYS2-Paket
+      # ändert; gespeichert wird auch dann, wenn der Rest des Builds danach scheitert.
+      - id: pkgs
+        run: echo "hash=$(pacman -Q | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+      - id: deps
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            build/windows/src
+            build/windows/lgpl
+            build/windows/export
+          key: windows-deps-${{ hashFiles('scripts/build-windows-deps.sh') }}-${{ steps.pkgs.outputs.hash }}
+      - run: scripts/build-windows-deps.sh
+      - if: steps.deps.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            build/windows/src
+            build/windows/lgpl
+            build/windows/export
+          key: ${{ steps.deps.outputs.cache-primary-key }}
       - run: scripts/build-windows.sh
       - uses: actions/upload-artifact@v7
         with:

@@ -7,7 +7,10 @@
   STAGE/licenses, plus the ones passed with --license, and writes an overview
 - writes the MSYS2 source package names (pkgbase-version) to the --sources file
 
-Usage: stage-windows.py STAGE SEARCH_DIR... --license "NAME=FILE"... --sources FILE
+Usage: stage-windows.py STAGE SEARCH_DIR... --msys-root DIR --license "NAME=FILE"... --sources FILE
+
+MSYS2's Python is a native Windows program: all paths must be Windows paths
+(cygpath -w), MSYS2's own files are found below --msys-root.
 """
 import argparse
 import re
@@ -16,7 +19,6 @@ import subprocess
 from pathlib import Path
 
 PREFIX = "mingw-w64-ucrt-x86_64-"
-LOCAL_DB = Path("/var/lib/pacman/local")
 
 
 def imports(binary: Path) -> list[str]:
@@ -39,12 +41,12 @@ def copy_dependencies(stage: Path, search: list[Path]) -> None:
             todo.append(Path(shutil.copy2(available[name], stage / "bin")))
 
 
-def installed_packages() -> dict[str, dict[str, str]]:
+def installed_packages(msys_root: Path) -> dict[str, dict[str, str]]:
     """name -> {version, base} from pacman's local database."""
     pkgs = {}
-    for desc in LOCAL_DB.glob("*/desc"):
+    for desc in (msys_root / "var/lib/pacman/local").glob("*/desc"):
         fields, key = {}, None
-        for line in desc.read_text().splitlines():
+        for line in desc.read_text(encoding="utf-8").splitlines():
             if line.startswith("%") and line.endswith("%"):
                 key = line.strip("%")
             elif line and key and key not in fields:
@@ -55,7 +57,7 @@ def installed_packages() -> dict[str, dict[str, str]]:
 
 def owners(stage: Path) -> set[str]:
     """MSYS2 packages that own a file with the name of a staged file."""
-    listing = subprocess.run(["pacman", "-Ql"], capture_output=True, text=True, check=True).stdout
+    listing = subprocess.run(["pacman", "-Ql"], capture_output=True, check=True).stdout.decode("utf-8", "replace")
     by_name: dict[str, str] = {}
     for line in listing.splitlines():
         pkg, _, path = line.partition(" ")
@@ -68,6 +70,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("stage", type=Path)
     ap.add_argument("search", type=Path, nargs="+")
+    ap.add_argument("--msys-root", type=Path, required=True)
     ap.add_argument("--license", action="append", default=[], help="NAME=FILE")
     ap.add_argument("--sources", type=Path, required=True)
     args = ap.parse_args()
@@ -76,7 +79,7 @@ def main() -> None:
 
     licenses = args.stage / "licenses"
     licenses.mkdir(exist_ok=True)
-    pkgs = installed_packages()
+    pkgs = installed_packages(args.msys_root)
     used = sorted(owners(args.stage))
     lines = [
         "ReVideo enthält die folgenden Open-Source-Komponenten unter ihren eigenen Lizenzen.",
@@ -96,14 +99,16 @@ def main() -> None:
         lines.append(f"{name}  ->  licenses/{target.name}/")
     for pkg in used:
         short = pkg.removeprefix(PREFIX)
-        src = Path("/ucrt64/share/licenses") / short
+        src = args.msys_root / "ucrt64/share/licenses" / short
         if src.is_dir():
             shutil.copytree(src, licenses / short, dirs_exist_ok=True)
         lines.append(f"{short} {pkgs[pkg]['version']}  ->  licenses/{short}/")
-    (licenses / "THIRD-PARTY.txt").write_text("\r\n".join(lines) + "\r\n", encoding="utf-8")
+    (licenses / "THIRD-PARTY.txt").write_text("\r\n".join(lines) + "\r\n", encoding="utf-8", newline="")
 
-    bases = sorted({f"{pkgs[p]['base']}-{pkgs[p]['version']}" for p in used})
-    args.sources.write_text("\n".join(bases) + "\n")
+    # Source file names write an epoch ("2:1.0-1") as "2~1.0-1".
+    bases = sorted({f"{pkgs[p]['base']}-{pkgs[p]['version'].replace(':', '~')}" for p in used})
+    # Read by a bash loop: LF only.
+    args.sources.write_text("\n".join(bases) + "\n", newline="\n")
     size = sum(f.stat().st_size for f in args.stage.rglob("*") if f.is_file())
     print(f"{len(used)} MSYS2-Pakete, {size / 1e6:.0f} MB in {args.stage}")
 
