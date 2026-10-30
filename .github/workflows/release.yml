@@ -20,7 +20,7 @@ jobs:
       version: ${{ steps.v.outputs.version }}
       release: ${{ steps.v.outputs.release }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - id: v
         run: |
           version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
@@ -43,7 +43,7 @@ jobs:
       image: ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-25.08
       options: --privileged
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         with:
           manifest-path: packaging/linux/de.retrydev.ReVideo.yml
@@ -51,7 +51,7 @@ jobs:
           # ffmpeg, x264 und dav1d nur neu bauen, wenn sich das Manifest ändert.
           cache-key: flatpak-builder-${{ hashFiles('packaging/linux/de.retrydev.ReVideo.yml') }}
           upload-artifact: false
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: flatpak
           path: ReVideo-${{ needs.version.outputs.version }}-x86_64.flatpak
@@ -65,8 +65,8 @@ jobs:
     container: archlinux:latest
     steps:
       - run: pacman -Syu --noconfirm --needed base-devel rustup mingw-w64-gcc pkgconf python zstd git
-      - uses: actions/checkout@v4
-      - uses: actions/cache@v4
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -76,8 +76,8 @@ jobs:
           key: windows-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
           restore-keys: windows-
       - run: rustup toolchain install
-      - run: scripts/build.sh windows-stage
-      - uses: actions/upload-artifact@v4
+      - run: scripts/build.sh stage
+      - uses: actions/upload-artifact@v7
         with:
           name: windows-stage
           path: build/windows/stage
@@ -86,14 +86,14 @@ jobs:
     needs: windows-stage
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: sudo apt-get update && sudo apt-get install -y nsis
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: windows-stage
           path: build/windows/stage
-      - run: mkdir -p dist && scripts/build.sh windows-installer
-      - uses: actions/upload-artifact@v4
+      - run: scripts/build.sh installer
+      - uses: actions/upload-artifact@v7
         with:
           name: installer
           path: dist/*-setup.exe
@@ -102,11 +102,11 @@ jobs:
     needs: [version, flatpak, windows-installer]
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: flatpak
           path: dist
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: installer
           path: dist

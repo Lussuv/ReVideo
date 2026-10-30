@@ -1,25 +1,15 @@
 #!/usr/bin/env bash
-# Baut ReVideo als Flatpak (Linux) und als NSIS-Installer (Windows, cross-kompiliert).
-# Aufruf: scripts/build.sh [linux|windows|all]   — Ergebnis liegt in dist/
+# Windows-Build für GitHub Actions (.github/workflows/release.yml), das Flatpak baut dort
+# die flatpak-builder-Action. Aufruf: scripts/build.sh [stage|installer]
+#   stage      Cross-Build + DLLs nach build/windows/stage (Arch-Container: UCRT-mingw)
+#   installer  NSIS-Installer nach dist/ (Ubuntu: makensis)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
-APP_ID=de.retrydev.ReVideo
-mkdir -p dist
 
-build_linux() {
-    flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-    flatpak-builder --user --force-clean --install-deps-from=flathub \
-        --repo=build/flatpak-repo build/flatpak "packaging/linux/$APP_ID.yml"
-    flatpak build-bundle build/flatpak-repo "dist/ReVideo-$VERSION-x86_64.flatpak" "$APP_ID" \
-        --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo
-    ls -lh "dist/ReVideo-$VERSION-x86_64.flatpak"
-}
-
-stage_windows() {
+stage() {
     local sysroot=$PWD/build/windows/sysroot
-    # Löschen von build/windows holt beim nächsten Lauf aktuelle MSYS2-Pakete.
     [ -d "$sysroot/ucrt64" ] || python3 -I scripts/fetch-windows-deps.py "$sysroot"
     PKG_CONFIG_ALLOW_CROSS=1 PKG_CONFIG_SYSROOT_DIR="$sysroot" PKG_CONFIG_PATH= \
         PKG_CONFIG_LIBDIR="$sysroot/ucrt64/lib/pkgconfig" \
@@ -28,18 +18,15 @@ stage_windows() {
         "$sysroot/ucrt64" build/windows/stage
 }
 
-installer_windows() {
+installer() {
+    mkdir -p dist
     makensis -V2 -DVERSION="$VERSION" -DSTAGE="$PWD/build/windows/stage" \
         -DOUTFILE="$PWD/dist/ReVideo-$VERSION-setup.exe" packaging/windows/installer.nsi
     ls -lh "dist/ReVideo-$VERSION-setup.exe"
 }
 
-case "${1:-all}" in
-    linux) build_linux ;;
-    windows) stage_windows; installer_windows ;;
-    # Einzelschritte für CI: Cross-Build im Arch-Container, makensis auf Ubuntu.
-    windows-stage) stage_windows ;;
-    windows-installer) installer_windows ;;
-    all) build_linux; stage_windows; installer_windows ;;
-    *) echo "Aufruf: $0 [linux|windows|all|windows-stage|windows-installer]" >&2; exit 1 ;;
+case "${1:-}" in
+    stage) stage ;;
+    installer) installer ;;
+    *) echo "Aufruf: $0 [stage|installer]" >&2; exit 1 ;;
 esac

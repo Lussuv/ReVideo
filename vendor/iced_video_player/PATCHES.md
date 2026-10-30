@@ -9,5 +9,7 @@ Alle Stellen sind im Code mit `ReVideo patch` markiert.
   einem neuen Bild (vorher dauerhaft ~30/s).
 - `src/video.rs`: Neue Funktion `Video::frame_position()` liefert den Zeitstempel des
   angezeigten Frames; `position()` fragt die Pipeline und kann einen Frame hinterherhinken.
+- `src/video.rs`: `Frame::readable()` mit `'_` in der Rückgabe, gegen die Warnung
+  `mismatched_lifetime_syntaxes` neuerer Rust-Versionen.
 
 Bei einem Update der Crate: neue Version hierher kopieren und die markierten Stellen übertragen.

@@ -10,98 +10,56 @@ Frame-Export und Schnitt über ffmpeg.
 - Aktuellen Frame als PNG speichern, Vor/Zurück im Ordner, Löschen in den Papierkorb
 - Tasten: `Leertaste` Play/Pause · `←`/`→` ±5 s · `,`/`.` Frame zurück/vor · `Entf` löschen · `F11` Vollbild
 
-Ausgeliefert wird als **Flatpak** (Linux) und als **NSIS-Installer** (Windows). Beides
-wird unter Linux gebaut.
+Ausgeliefert wird als **Flatpak** (Linux) und als **NSIS-Installer** (Windows). Gebaut
+wird beides auf GitHub, lokal läuft nur die Entwicklung.
 
-## Entwicklungsumgebung einrichten
+## Entwicklung
 
-### 1. Pakete
+### Pakete
 
 Arch / CachyOS:
 
 ```sh
-sudo pacman -S --needed base-devel rustup pkgconf python zstd \
-    gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad gst-plugins-ugly gst-libav ffmpeg \
-    mingw-w64-gcc flatpak flatpak-builder watchexec
-paru -S nsis   # makensis — falls es nicht in den offiziellen Repos liegt, aus dem AUR
+sudo pacman -S --needed base-devel rustup pkgconf watchexec \
+    gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad gst-plugins-ugly gst-libav ffmpeg
 ```
 
 Debian / Ubuntu:
 
 ```sh
-sudo apt install build-essential curl pkg-config python3 zstd \
+sudo apt install build-essential curl pkg-config \
     libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-plugins-good \
     gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav ffmpeg \
-    libxkbcommon-dev libwayland-dev mingw-w64 nsis flatpak flatpak-builder
+    libxkbcommon-dev libwayland-dev
 curl https://sh.rustup.rs -sSf | sh
 cargo install --locked watchexec-cli
 ```
 
-### 2. Rust-Toolchain
+Die Rust-Version steht in `rust-toolchain.toml`, rustup holt sie beim ersten `cargo`-Aufruf.
+Der Datei-Dialog läuft über xdg-desktop-portal. KDE und GNOME bringen es mit, auf
+anderen Desktops `xdg-desktop-portal` plus ein Backend (`-gtk` oder `-kde`) installieren.
 
-Version und Windows-Target stehen in `rust-toolchain.toml`. rustup installiert beides
-beim ersten `cargo`-Aufruf im Projektordner selbst, es ist nichts weiter zu tun.
+### Live-Vorschau
 
-### 3. Starten und testen
-
-Live-Test (speichern → neu bauen → App startet neu, ca. 5 s):
+Speichern → neu bauen → App startet neu (ca. 5 s):
 
 ```sh
 watchexec -r -e rs,toml -w src -w Cargo.toml -- cargo run
 ```
 
-Der Datei-Dialog läuft über xdg-desktop-portal. KDE und GNOME bringen es mit, auf
-anderen Desktops `xdg-desktop-portal` plus ein Backend (`-gtk` oder `-kde`) installieren.
+Mit einem Video zum Testen: `… -- cargo run -- ~/Videos/clip.mkv`
 
-Einmal starten, mit oder ohne Datei:
-
-```sh
-cargo run
-```
-
-```sh
-cargo run -- ~/Videos/clip.mkv
-```
-
-Tests (der zweite Befehl macht zusätzlich einen echten Export mit ffmpeg, beide Vorlagen):
+### Tests
 
 ```sh
 cargo test
 ```
 
 ```sh
-cargo test -- --include-ignored
+cargo test -- --include-ignored   # zusätzlich ein echter Export mit ffmpeg, beide Vorlagen
 ```
 
-### 4. Release bauen
-
-```sh
-scripts/build.sh            # beides
-scripts/build.sh linux      # nur Flatpak
-scripts/build.sh windows    # nur Windows-Installer
-```
-
-Ergebnis in `dist/`:
-
-| Datei | Inhalt |
-|---|---|
-| `ReVideo-<version>-x86_64.flatpak` | Flatpak-Bundle, installieren mit `flatpak install --user dist/ReVideo-*.flatpak` |
-| `ReVideo-<version>-setup.exe` | Windows-Installer (pro Benutzer, ohne Admin-Rechte), trägt ReVideo unter „Öffnen mit“ ein |
-
-Die Version steht nur in `Cargo.toml`. Build-Skript und Installer lesen sie von dort.
-
-**Flatpak:** Beim ersten Lauf werden die Runtime `org.freedesktop.Platform//25.08` und
-die Rust-SDK-Erweiterung von Flathub installiert. ffmpeg und x264 werden ins Flatpak
-gebaut, GStreamer samt Codecs kommt aus der Runtime. `flatpak-builder` braucht
-User-Namespaces, läuft also auf dem Host und nicht in einem unprivilegierten Container.
-
-**Windows:** `scripts/fetch-windows-deps.py` lädt GStreamer und ffmpeg aus dem
-MSYS2-Repository (`ucrt64`) nach `build/windows/sysroot`. Danach wird mit
-`x86_64-pc-windows-gnu` cross-kompiliert, und `scripts/stage-windows.py` kopiert
-nur die tatsächlich importierten DLLs in den Installer. Wenn du `build/windows`
-löschst, holt der nächste Lauf aktuelle Pakete.
-
-### 5. Release veröffentlichen
+## Release
 
 Der Code liegt privat in `Lussuv/ReVideo`. Die fertigen Pakete kommen in das öffentliche
 [Lussuv/ReVideo-releases](https://github.com/Lussuv/ReVideo-releases), dort fragt die App beim Start nach.
@@ -116,12 +74,18 @@ die Nutzer erst mit der nächsten Minor-Version. Voraussetzung ist das Secret `R
 im Code-Repo: ein Fine-grained Token nur für `ReVideo-releases` mit
 „Contents: Read and write“.
 
-Von Hand geht es auch: `scripts/build.sh`, dann im Release-Repo ein Release mit Tag
-`v<version>` anlegen und die beiden Dateien aus `dist/` anhängen.
+**Flatpak:** Runtime `org.freedesktop.Platform//25.08`. ffmpeg, x264 und dav1d werden ins
+Flatpak gebaut, GStreamer samt Codecs kommt aus der Runtime.
 
-Windows lädt den Installer, prüft ihn gegen die SHA-256, die GitHub beim Hochladen
-berechnet, installiert still und startet neu. Unter Linux öffnet der Update-Knopf die
-Release-Seite.
+**Windows:** `scripts/fetch-windows-deps.py` lädt GStreamer und ffmpeg aus dem
+MSYS2-Repository (`ucrt64`). Danach wird mit `x86_64-pc-windows-gnu` cross-kompiliert,
+und `scripts/stage-windows.py` kopiert nur die tatsächlich importierten DLLs in den
+Installer. Der Installer arbeitet pro Benutzer ohne Admin-Rechte und trägt ReVideo unter
+„Öffnen mit“ ein.
+
+**Updates:** Windows lädt den Installer, prüft ihn gegen die SHA-256, die GitHub beim
+Hochladen berechnet, installiert still und startet neu. Unter Linux öffnet der
+Update-Knopf die Release-Seite.
 
 ## Aufbau
 
@@ -134,6 +98,6 @@ src/ffmpeg.rs     ffmpeg/ffprobe-Aufrufe mit Fortschritt
 src/update.rs     Update-Prüfung und -Installation über GitHub-Releases
 src/theme.rs      Retry-Design-Farben und Widget-Stile
 packaging/        Flatpak-Manifest, Desktop-Datei, NSIS-Skript
-scripts/          Build-Skript und Windows-Helfer
+scripts/          Windows-Build für GitHub Actions
 assets/           Icons, Schriften (Inter, JetBrains Mono — OFL)
 ```
