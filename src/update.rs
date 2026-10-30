@@ -9,7 +9,7 @@ const LATEST: &str = "https://api.github.com/repos/Lussuv/ReVideo-releases/relea
 pub struct Update {
     pub version: String,
     pub page: String,
-    /// Windows only: installer URL and its SHA-256 (hex) from the release.
+    /// Windows installer or Flatpak bundle: URL and its SHA-256 (hex) from the release.
     pub installer: Option<(String, String)>,
 }
 
@@ -51,14 +51,15 @@ fn latest() -> Result<Option<Update>, ureq::Error> {
     if !is_newer(version, env!("CARGO_PKG_VERSION")) {
         return Ok(None);
     }
-    let installer = cfg!(windows)
-        .then(|| {
-            release
-                .assets
-                .iter()
-                .find(|a| a.name.ends_with("-setup.exe"))
-        })
-        .flatten()
+    let suffix = if cfg!(windows) {
+        Some("-setup.exe")
+    } else if in_flatpak() {
+        Some(".flatpak")
+    } else {
+        None
+    };
+    let installer = suffix
+        .and_then(|s| release.assets.iter().find(|a| a.name.ends_with(s)))
         .and_then(|a| {
             let hash = a.digest.as_deref()?.strip_prefix("sha256:")?;
             Some((a.browser_download_url.clone(), hash.to_lowercase()))
@@ -68,6 +69,10 @@ fn latest() -> Result<Option<Update>, ureq::Error> {
         page: release.html_url,
         installer,
     }))
+}
+
+fn in_flatpak() -> bool {
+    std::path::Path::new("/.flatpak-info").exists()
 }
 
 fn is_newer(candidate: &str, current: &str) -> bool {
@@ -88,10 +93,14 @@ pub fn open_page(url: &str) -> Result<(), String> {
         .map_err(|e| format!("Browser konnte nicht geöffnet werden: {e}"))
 }
 
-/// Downloads and verifies the installer, then starts it silently. The installer
-/// waits for this process to exit and launches the new version afterwards.
+/// Downloads and verifies the update, then installs it: on Windows the installer
+/// waits for this process to exit and launches the new version afterwards; in
+/// Flatpak the bundle is installed right away and the new version started.
 pub async fn install(url: String, sha256: String) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
+        if !cfg!(windows) {
+            return install_flatpak(&url, &sha256);
+        }
         let path = crate::ffmpeg::temp_subdir("update")
             .map_err(|e| e.to_string())?
             .join("ReVideo-setup.exe");
@@ -106,6 +115,45 @@ pub async fn install(url: String, sha256: String) -> Result<(), String> {
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// Needs `--talk-name=org.freedesktop.Flatpak` for `flatpak-spawn --host`.
+fn install_flatpak(url: &str, sha256: &str) -> Result<(), String> {
+    // The host's flatpak has to read the bundle: the sandbox's /tmp is private,
+    // XDG_CACHE_HOME (~/.var/app/<id>/cache) has the same path on both sides.
+    let dir = std::env::var_os("XDG_CACHE_HOME").ok_or("XDG_CACHE_HOME fehlt")?;
+    let path = std::path::Path::new(&dir).join("ReVideo-update.flatpak");
+    download(url, sha256, &path)?;
+
+    // Same installation this instance runs from, otherwise the old one stays in use.
+    let info = std::fs::read_to_string("/.flatpak-info").unwrap_or_default();
+    let user = info
+        .lines()
+        .any(|l| l.starts_with("app-path=") && l.contains("/.local/share/flatpak/"));
+    let host = || {
+        let mut cmd = std::process::Command::new("flatpak-spawn");
+        cmd.args(["--host", "flatpak"]);
+        cmd
+    };
+    let out = host()
+        .args(["install", if user { "--user" } else { "--system" }])
+        .args(["--noninteractive", "-y", "--bundle"])
+        .arg(&path)
+        .output()
+        .map_err(|e| format!("Flatpak konnte nicht gestartet werden: {e}"))?;
+    let _ = std::fs::remove_file(&path);
+    if !out.status.success() {
+        return Err(format!(
+            "Update-Installation fehlgeschlagen: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+    let id = std::env::var("FLATPAK_ID").unwrap_or_else(|_| "de.retrydev.ReVideo".into());
+    host()
+        .args(["run", &id])
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("Neue Version konnte nicht gestartet werden: {e}"))
 }
 
 fn download(url: &str, sha256: &str, path: &std::path::Path) -> Result<(), String> {

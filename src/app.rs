@@ -1,6 +1,7 @@
 use crate::format::{aspect_ratio, format_bytes, format_time, parse_time};
 use crate::icons::{icon, Icon};
 use crate::media::{self, ExportPreset, Progress, VideoInfo};
+use crate::settings::{self, Settings};
 use crate::theme::{self, *};
 use crate::timeline::{Timeline, TimelineEvent, TrimRange, HANDLE_W, TICKS_H};
 use crate::update::{self, Update};
@@ -33,6 +34,7 @@ pub enum Message {
     SeekDrag(f64),
     SeekRelease,
     Volume(f64),
+    VolumeRelease,
     ToggleMute,
     ToggleFullscreen,
     StageHover,
@@ -114,6 +116,7 @@ pub struct App {
 
 impl App {
     pub fn new() -> (Self, Task<Message>) {
+        let settings = settings::load();
         let app = Self {
             info: None,
             video: None,
@@ -126,8 +129,8 @@ impl App {
             resume_after_drag: None,
             seeked_since_pause: false,
             trim_drag_origin: None,
-            volume: 0.8,
-            muted: false,
+            volume: settings.volume,
+            muted: settings.muted,
             fullscreen: false,
             controls_until: Instant::now(),
             controls_hovered: false,
@@ -250,6 +253,13 @@ impl App {
         self.controls_until = Instant::now() + CONTROLS_HIDE_AFTER;
     }
 
+    fn save_settings(&self) {
+        settings::save(Settings {
+            volume: self.volume,
+            muted: self.muted,
+        });
+    }
+
     fn clear_video(&mut self) {
         self.load_id += 1;
         media::cancel_thumbnails();
@@ -284,6 +294,12 @@ impl App {
                 );
             }
             Message::Load(path) => {
+                // Tearing a pipeline down blocks (~100 ms here, longer on Windows); the
+                // file handle only matters for deleting, which uses clear_video directly.
+                if let Some(mut old) = self.video.take() {
+                    old.set_muted(true);
+                    std::thread::spawn(move || drop(old));
+                }
                 self.clear_video();
                 self.loading = true;
                 self.error = None;
@@ -401,11 +417,13 @@ impl App {
                     video.set_muted(self.muted);
                 }
             }
+            Message::VolumeRelease => self.save_settings(),
             Message::ToggleMute => {
                 self.muted = !self.muted;
                 if let Some(video) = &mut self.video {
                     video.set_muted(self.muted);
                 }
+                self.save_settings();
             }
             Message::ToggleFullscreen => {
                 self.fullscreen = !self.fullscreen;
@@ -941,6 +959,7 @@ impl App {
             if self.muted { 0.0 } else { self.volume },
             Message::Volume,
         )
+        .on_release(Message::VolumeRelease)
         .step(0.01)
         .width(96)
         .style(theme::seek_slider);

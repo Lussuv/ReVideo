@@ -13,6 +13,8 @@ finish-args:
   - --socket=pulseaudio
   # Update check against the GitHub releases API.
   - --share=network
+  # In-app updates: installs the downloaded bundle via `flatpak-spawn --host flatpak`.
+  - --talk-name=org.freedesktop.Flatpak
   # Navigation through the folder of the open video, export next to the source.
   - --filesystem=host
 

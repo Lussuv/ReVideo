@@ -5,6 +5,7 @@ mod ffmpeg;
 mod format;
 mod icons;
 mod media;
+mod settings;
 mod theme;
 mod timeline;
 mod update;
@@ -21,6 +22,7 @@ fn main() -> iced::Result {
         .window(iced::window::Settings {
             size: iced::Size::new(1280.0, 800.0),
             min_size: Some(iced::Size::new(960.0, 600.0)),
+            position: iced::window::Position::Centered,
             icon: iced::window::icon::from_file_data(
                 include_bytes!("../assets/icon-128.png"),
                 None,
