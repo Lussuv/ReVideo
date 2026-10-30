@@ -1,4 +1,4 @@
-; ReVideo Windows-Installer. Aufruf über scripts/build.sh:
+; ReVideo Windows-Installer. Aufruf über scripts/build-windows.sh:
 ;   makensis -DVERSION=x.y.z -DSTAGE=<install-tree> -DOUTFILE=<setup.exe> installer.nsi
 Unicode true
 SetCompressor /SOLID lzma
@@ -63,10 +63,12 @@ Section "Install"
   ; Silent = in-app update: give the calling ReVideo.exe time to exit and release its files.
   IfSilent 0 +2
     Sleep 2000
-  ; Old files of a previous version must not mix with the new plugin set.
+  ; Old files of a previous version must not mix with the new ones (also removes
+  ; the GStreamer tree of versions before 3.4).
   RMDir /r "$INSTDIR\bin"
   RMDir /r "$INSTDIR\lib"
   RMDir /r "$INSTDIR\libexec"
+  RMDir /r "$INSTDIR\licenses"
   SetOutPath "$INSTDIR"
   File /r "${STAGE}\*"
   WriteUninstaller "$INSTDIR\Uninstall.exe"

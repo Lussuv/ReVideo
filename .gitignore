@@ -1,5 +1,4 @@
 # build output
-/target/
 /build/
 /dist/
 /.flatpak-builder/
@@ -13,3 +12,6 @@ __pycache__/
 
 # logs
 *.log
+
+/.qtcreator/
+CMakeLists.txt.user

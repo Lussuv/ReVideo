@@ -1,57 +1,111 @@
 #!/usr/bin/env python3
-"""Copies ReVideo.exe, ffmpeg, the GStreamer plugins and exactly the DLLs they
-import (transitively) from the sysroot into a relocatable install tree.
+"""Completes the Windows install tree after windeployqt (runs in MSYS2 UCRT64).
 
-Usage: stage-windows.py EXE SYSROOT STAGE_DIR
+- copies every DLL the staged executables, plugins and QML modules import
+  (transitively), searching the given directories in order
+- copies the license files of all MSYS2 packages the staged files come from into
+  STAGE/licenses, plus the ones passed with --license, and writes an overview
+- writes the MSYS2 source package names (pkgbase-version) to the --sources file
 
-GStreamer finds its plugins relative to libgstreamer-1.0-0.dll (bin/../lib),
-so the tree keeps the MSYS2 layout: bin/, lib/gstreamer-1.0/, libexec/.
+Usage: stage-windows.py STAGE SEARCH_DIR... --license "NAME=FILE"... --sources FILE
 """
+import argparse
 import re
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
-OBJDUMP = shutil.which("x86_64-w64-mingw32-objdump") or "objdump"
-# Plugins that drag in large stacks (GTK, Qt, Python, OpenCV, …) the player never uses.
-SKIP_PLUGINS = re.compile(r"gtk|qt|python|opencv|vulkan|webrtc|nice|srt|rtmp|onnx|whisper|aja|decklink|codec2json")
+PREFIX = "mingw-w64-ucrt-x86_64-"
+LOCAL_DB = Path("/var/lib/pacman/local")
 
 
 def imports(binary: Path) -> list[str]:
-    out = subprocess.run([OBJDUMP, "-p", str(binary)], capture_output=True, text=True, check=True).stdout
+    out = subprocess.run(["objdump", "-p", str(binary)], capture_output=True, text=True, check=True).stdout
     return re.findall(r"DLL Name: (\S+)", out)
 
 
-def main() -> None:
-    exe, sysroot, stage = Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3])
-    if stage.exists():
-        shutil.rmtree(stage)
-    (stage / "bin").mkdir(parents=True)
-    (stage / "lib/gstreamer-1.0").mkdir(parents=True)
-    (stage / "libexec/gstreamer-1.0").mkdir(parents=True)
-
-    roots = [shutil.copy2(exe, stage / "bin/ReVideo.exe")]
-    for tool in ("ffmpeg.exe", "ffprobe.exe"):
-        roots.append(shutil.copy2(sysroot / "bin" / tool, stage / "bin"))
-    roots.append(shutil.copy2(sysroot / "libexec/gstreamer-1.0/gst-plugin-scanner.exe", stage / "libexec/gstreamer-1.0"))
-    for plugin in sorted((sysroot / "lib/gstreamer-1.0").glob("*.dll")):
-        if not SKIP_PLUGINS.search(plugin.name):
-            roots.append(shutil.copy2(plugin, stage / "lib/gstreamer-1.0"))
-
-    available = {p.name.lower(): p for p in (sysroot / "bin").glob("*.dll")}
-    copied: set[str] = set()
-    todo = [Path(r) for r in roots]
+def copy_dependencies(stage: Path, search: list[Path]) -> None:
+    available: dict[str, Path] = {}
+    for d in reversed(search):  # earlier directories win
+        available.update({p.name.lower(): p for p in d.glob("*.dll")})
+    present = {p.name.lower() for p in stage.rglob("*.dll")}
+    todo = [p for p in stage.rglob("*") if p.suffix.lower() in (".exe", ".dll")]
     while todo:
         for dll in imports(todo.pop()):
             name = dll.lower()
-            if name in copied or name not in available:
+            if name in present or name not in available:
                 continue  # system DLL (kernel32, ucrt api sets, …) or already staged
-            copied.add(name)
+            present.add(name)
             todo.append(Path(shutil.copy2(available[name], stage / "bin")))
 
-    size = sum(f.stat().st_size for f in stage.rglob("*") if f.is_file())
-    print(f"{len(roots)} Einstiegspunkte, {len(copied)} DLLs, {size / 1e6:.0f} MB in {stage}")
+
+def installed_packages() -> dict[str, dict[str, str]]:
+    """name -> {version, base} from pacman's local database."""
+    pkgs = {}
+    for desc in LOCAL_DB.glob("*/desc"):
+        fields, key = {}, None
+        for line in desc.read_text().splitlines():
+            if line.startswith("%") and line.endswith("%"):
+                key = line.strip("%")
+            elif line and key and key not in fields:
+                fields[key] = line
+        pkgs[fields["NAME"]] = {"version": fields["VERSION"], "base": fields.get("BASE", fields["NAME"])}
+    return pkgs
+
+
+def owners(stage: Path) -> set[str]:
+    """MSYS2 packages that own a file with the name of a staged file."""
+    listing = subprocess.run(["pacman", "-Ql"], capture_output=True, text=True, check=True).stdout
+    by_name: dict[str, str] = {}
+    for line in listing.splitlines():
+        pkg, _, path = line.partition(" ")
+        if pkg.startswith(PREFIX) and path.lower().endswith((".dll", ".exe")):
+            by_name.setdefault(Path(path).name.lower(), pkg)
+    return {by_name[p.name.lower()] for p in stage.rglob("*") if p.name.lower() in by_name}
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("stage", type=Path)
+    ap.add_argument("search", type=Path, nargs="+")
+    ap.add_argument("--license", action="append", default=[], help="NAME=FILE")
+    ap.add_argument("--sources", type=Path, required=True)
+    args = ap.parse_args()
+
+    copy_dependencies(args.stage, args.search)
+
+    licenses = args.stage / "licenses"
+    licenses.mkdir(exist_ok=True)
+    pkgs = installed_packages()
+    used = sorted(owners(args.stage))
+    lines = [
+        "ReVideo enthält die folgenden Open-Source-Komponenten unter ihren eigenen Lizenzen.",
+        "Der Quellcode genau dieser Versionen liegt jedem Release als",
+        "ReVideo-<version>-windows-sources.tar bei:",
+        "https://github.com/Lussuv/ReVideo-releases/releases",
+        "",
+        "Die Bibliotheken liegen als austauschbare DLLs in bin/. ffmpeg.exe (GPL) ist ein",
+        "eigenständiges Programm, das ReVideo für Export, Vorschaubilder und Frames aufruft.",
+        "",
+    ]
+    for entry in args.license:
+        name, _, file = entry.partition("=")
+        target = licenses / re.sub(r"[^A-Za-z0-9.-]+", "-", name).strip("-")
+        target.mkdir(exist_ok=True)
+        shutil.copy2(file, target)
+        lines.append(f"{name}  ->  licenses/{target.name}/")
+    for pkg in used:
+        short = pkg.removeprefix(PREFIX)
+        src = Path("/ucrt64/share/licenses") / short
+        if src.is_dir():
+            shutil.copytree(src, licenses / short, dirs_exist_ok=True)
+        lines.append(f"{short} {pkgs[pkg]['version']}  ->  licenses/{short}/")
+    (licenses / "THIRD-PARTY.txt").write_text("\r\n".join(lines) + "\r\n", encoding="utf-8")
+
+    bases = sorted({f"{pkgs[p]['base']}-{pkgs[p]['version']}" for p in used})
+    args.sources.write_text("\n".join(bases) + "\n")
+    size = sum(f.stat().st_size for f in args.stage.rglob("*") if f.is_file())
+    print(f"{len(used)} MSYS2-Pakete, {size / 1e6:.0f} MB in {args.stage}")
 
 
 if __name__ == "__main__":

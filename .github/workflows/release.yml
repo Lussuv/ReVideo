@@ -1,14 +1,16 @@
 # Baut Flatpak und Windows-Installer und veröffentlicht beides im öffentlichen Repo
 # Lussuv/ReVideo-releases, wo die App nach Updates fragt. Auslöser: Push auf main mit
-# neuer Major- oder Minor-Version in Cargo.toml (3.1.0, 4.0.0); Patch-Versionen
-# (3.1.1) und schon veröffentlichte Versionen werden übersprungen.
+# neuer Major- oder Minor-Version in CMakeLists.txt (3.4.0, 4.0.0); Patch-Versionen
+# (3.4.1) und schon veröffentlichte Versionen werden übersprungen.
+# Jedes Release enthält außerdem den Quellcode der mitgelieferten Fremdkomponenten
+# (LGPL/GPL), getrennt für Linux und Windows.
 # Secret RELEASES_TOKEN: Fine-grained Token, nur ReVideo-releases, "Contents: Read and write".
 name: Release
 
 on:
   push:
     branches: [main]
-    paths: [Cargo.toml]
+    paths: [CMakeLists.txt]
 
 # Zwei schnelle Pushes sollen nicht beide dieselbe Version bauen.
 concurrency: release
@@ -23,7 +25,7 @@ jobs:
       - uses: actions/checkout@v7
       - id: v
         run: |
-          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          version=$(sed -n 's/^project(ReVideo VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
           echo "version=$version" >> "$GITHUB_OUTPUT"
           if [ "${version##*.}" != 0 ]; then
             echo "$version ist eine Patch-Version, kein Release."
@@ -42,64 +44,56 @@ jobs:
     container:
       image: ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-25.08
       options: --privileged
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
     steps:
       - uses: actions/checkout@v7
       - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         with:
           manifest-path: packaging/linux/de.retrydev.ReVideo.yml
           bundle: ReVideo-${{ needs.version.outputs.version }}-x86_64.flatpak
-          # ffmpeg, x264 und dav1d nur neu bauen, wenn sich das Manifest ändert.
+          # Fremdmodule (mpv, ffmpeg, …) nur neu bauen, wenn sich das Manifest ändert.
           cache-key: flatpak-builder-${{ hashFiles('packaging/linux/de.retrydev.ReVideo.yml') }}
           upload-artifact: false
+      # Die Downloads von flatpak-builder sind genau die Quellen der Fremdmodule.
+      - run: >-
+          tar -cf "ReVideo-$VERSION-linux-sources.tar" packaging/linux/de.retrydev.ReVideo.yml
+          -C .flatpak-builder downloads git
       - uses: actions/upload-artifact@v7
         with:
           name: flatpak
-          path: ReVideo-${{ needs.version.outputs.version }}-x86_64.flatpak
+          path: |
+            ReVideo-${{ needs.version.outputs.version }}-x86_64.flatpak
+            ReVideo-${{ needs.version.outputs.version }}-linux-sources.tar
 
-  # Arch wie auf dem Entwicklungsrechner: dessen mingw-w64 linkt gegen UCRT wie die
-  # MSYS2-ucrt64-Pakete, das mingw-w64 von Ubuntu gegen die alte msvcrt.
-  windows-stage:
+  # MSYS2 UCRT64 auf einem Windows-Runner; ffmpeg und mpv werden dort als LGPL gebaut,
+  # siehe scripts/build-windows.sh.
+  windows:
     needs: version
     if: needs.version.outputs.release == 'true'
-    runs-on: ubuntu-24.04
-    container: archlinux:latest
-    steps:
-      - run: pacman -Syu --noconfirm --needed base-devel rustup mingw-w64-gcc pkgconf python zstd git
-      - uses: actions/checkout@v7
-      - uses: actions/cache@v6
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            build/windows/pkg-cache
-            target
-          key: windows-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
-          restore-keys: windows-
-      - run: rustup toolchain install
-      - run: scripts/build.sh stage
-      - uses: actions/upload-artifact@v7
-        with:
-          name: windows-stage
-          path: build/windows/stage
-
-  windows-installer:
-    needs: windows-stage
-    runs-on: ubuntu-24.04
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
     steps:
       - uses: actions/checkout@v7
-      - run: sudo apt-get update && sudo apt-get install -y nsis
-      - uses: actions/download-artifact@v8
+      - uses: msys2/setup-msys2@v2
         with:
-          name: windows-stage
-          path: build/windows/stage
-      - run: scripts/build.sh installer
+          msystem: UCRT64
+          update: true
+          install: make diffutils tar zstd
+          pacboy: >-
+            toolchain:p cmake:p ninja:p meson:p nasm:p pkgconf:p python:p
+            qt6-base:p qt6-declarative:p libass:p libplacebo:p dav1d:p x264:p
+            ffnvcodec-headers:p nsis:p
+      - run: scripts/build-windows.sh
       - uses: actions/upload-artifact@v7
         with:
-          name: installer
-          path: dist/*-setup.exe
+          name: windows
+          path: dist/*
 
   publish:
-    needs: [version, flatpak, windows-installer]
+    needs: [version, flatpak, windows]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/download-artifact@v8
@@ -108,7 +102,7 @@ jobs:
           path: dist
       - uses: actions/download-artifact@v8
         with:
-          name: installer
+          name: windows
           path: dist
       - name: Release in ReVideo-releases anlegen
         env:
@@ -118,4 +112,6 @@ jobs:
           gh release create "v$VERSION" dist/* \
             --repo Lussuv/ReVideo-releases \
             --title "ReVideo $VERSION" \
-            --notes "ReVideo $VERSION"
+            --notes "ReVideo $VERSION
+
+          Die *-sources.tar enthalten den Quellcode der mitgelieferten Open-Source-Komponenten (ffmpeg, mpv, Qt u. a.)."
