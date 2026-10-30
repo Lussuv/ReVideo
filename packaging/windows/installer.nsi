@@ -60,6 +60,9 @@ VIAddVersionKey "LegalCopyright" "Retry"
 !macroend
 
 Section "Install"
+  ; Silent = in-app update: give the calling ReVideo.exe time to exit and release its files.
+  IfSilent 0 +2
+    Sleep 2000
   ; Old files of a previous version must not mix with the new plugin set.
   RMDir /r "$INSTDIR\bin"
   RMDir /r "$INSTDIR\lib"
@@ -89,6 +92,12 @@ Section "Install"
 
   System::Call "shell32::SHChangeNotify(i 0x08000000, i 0x1000, p 0, p 0)"
 SectionEnd
+
+; The finish page with "Run" is skipped in silent mode, so restart after an in-app update here.
+Function .onInstSuccess
+  IfSilent 0 +2
+    Exec '"$INSTDIR\bin\ReVideo.exe"'
+FunctionEnd
 
 Section "Uninstall"
   !insertmacro ALL_EXTS UNASSOC

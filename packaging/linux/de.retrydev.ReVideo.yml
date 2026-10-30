@@ -11,6 +11,8 @@ finish-args:
   - --socket=fallback-x11
   - --device=dri
   - --socket=pulseaudio
+  # Update check against the GitHub releases API.
+  - --share=network
   # Navigation through the folder of the open video, export next to the source.
   - --filesystem=host
 

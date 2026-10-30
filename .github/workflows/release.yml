@@ -1,0 +1,121 @@
+# Baut Flatpak und Windows-Installer und veröffentlicht beides im öffentlichen Repo
+# Lussuv/ReVideo-releases, wo die App nach Updates fragt. Auslöser: Push auf main mit
+# neuer Major- oder Minor-Version in Cargo.toml (3.1.0, 4.0.0); Patch-Versionen
+# (3.1.1) und schon veröffentlichte Versionen werden übersprungen.
+# Secret RELEASES_TOKEN: Fine-grained Token, nur ReVideo-releases, "Contents: Read and write".
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths: [Cargo.toml]
+
+# Zwei schnelle Pushes sollen nicht beide dieselbe Version bauen.
+concurrency: release
+
+jobs:
+  version:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      release: ${{ steps.v.outputs.release }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [ "${version##*.}" != 0 ]; then
+            echo "$version ist eine Patch-Version, kein Release."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          elif curl -sf -o /dev/null "https://api.github.com/repos/Lussuv/ReVideo-releases/releases/tags/v$version"; then
+            echo "v$version ist schon veröffentlicht."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  flatpak:
+    needs: version
+    if: needs.version.outputs.release == 'true'
+    runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-25.08
+      options: --privileged
+    steps:
+      - uses: actions/checkout@v4
+      - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        with:
+          manifest-path: packaging/linux/de.retrydev.ReVideo.yml
+          bundle: ReVideo-${{ needs.version.outputs.version }}-x86_64.flatpak
+          # ffmpeg, x264 und dav1d nur neu bauen, wenn sich das Manifest ändert.
+          cache-key: flatpak-builder-${{ hashFiles('packaging/linux/de.retrydev.ReVideo.yml') }}
+          upload-artifact: false
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flatpak
+          path: ReVideo-${{ needs.version.outputs.version }}-x86_64.flatpak
+
+  # Arch wie auf dem Entwicklungsrechner: dessen mingw-w64 linkt gegen UCRT wie die
+  # MSYS2-ucrt64-Pakete, das mingw-w64 von Ubuntu gegen die alte msvcrt.
+  windows-stage:
+    needs: version
+    if: needs.version.outputs.release == 'true'
+    runs-on: ubuntu-24.04
+    container: archlinux:latest
+    steps:
+      - run: pacman -Syu --noconfirm --needed base-devel rustup mingw-w64-gcc pkgconf python zstd git
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            build/windows/pkg-cache
+            target
+          key: windows-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: windows-
+      - run: rustup toolchain install
+      - run: scripts/build.sh windows-stage
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-stage
+          path: build/windows/stage
+
+  windows-installer:
+    needs: windows-stage
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y nsis
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-stage
+          path: build/windows/stage
+      - run: mkdir -p dist && scripts/build.sh windows-installer
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer
+          path: dist/*-setup.exe
+
+  publish:
+    needs: [version, flatpak, windows-installer]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: flatpak
+          path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: installer
+          path: dist
+      - name: Release in ReVideo-releases anlegen
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          gh release create "v$VERSION" dist/* \
+            --repo Lussuv/ReVideo-releases \
+            --title "ReVideo $VERSION" \
+            --notes "ReVideo $VERSION"

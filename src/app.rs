@@ -3,6 +3,7 @@ use crate::icons::{icon, Icon};
 use crate::media::{self, ExportPreset, Progress, VideoInfo};
 use crate::theme::{self, *};
 use crate::timeline::{Timeline, TimelineEvent, TrimRange, HANDLE_W, TICKS_H};
+use crate::update::{self, Update};
 use iced::keyboard::{self, key::Named, Key};
 use iced::widget::{
     button, canvas, center, column, container, image, mouse_area, opaque, row, sensor, slider,
@@ -60,6 +61,9 @@ pub enum Message {
     ConfirmDelete,
     CancelDelete,
     DismissError,
+    UpdateFound(Option<Update>),
+    InstallUpdate,
+    UpdateStarted(Result<(), String>),
     Key(keyboard::Event),
 }
 
@@ -103,6 +107,9 @@ pub struct App {
 
     delete_dialog: Option<DeleteChoice>,
     error: Option<String>,
+
+    update: Option<Update>,
+    updating: bool,
 }
 
 impl App {
@@ -138,9 +145,12 @@ impl App {
             exporting: None,
             delete_dialog: None,
             error: None,
+            update: None,
+            updating: false,
         };
         let task = media::launch_file().map_or_else(Task::none, |p| Task::done(Message::Load(p)));
-        (app, task)
+        let check = Task::perform(update::check(), Message::UpdateFound);
+        (app, Task::batch([task, check]))
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
@@ -575,6 +585,30 @@ impl App {
                 }
             }
             Message::DismissError => self.error = None,
+            Message::UpdateFound(found) => self.update = found,
+            Message::InstallUpdate => {
+                let Some(up) = &self.update else {
+                    return Task::none();
+                };
+                match up.installer.clone() {
+                    Some((url, sha256)) if !self.updating => {
+                        self.updating = true;
+                        return Task::perform(update::install(url, sha256), Message::UpdateStarted);
+                    }
+                    Some(_) => {}
+                    None => {
+                        if let Err(e) = update::open_page(&up.page) {
+                            self.error = Some(e);
+                        }
+                    }
+                }
+            }
+            // The installer replaces the files, so this instance has to go.
+            Message::UpdateStarted(Ok(())) => return iced::exit(),
+            Message::UpdateStarted(Err(e)) => {
+                self.updating = false;
+                self.error = Some(e);
+            }
             Message::Key(event) => return self.on_key(event),
         }
         Task::none()
@@ -763,9 +797,31 @@ impl App {
                 Message::AskDelete,
                 true
             ),
+            space::horizontal(),
         ]
         .spacing(2)
         .align_y(Alignment::Center);
+        let bar = match &self.update {
+            Some(up) => {
+                let (label, hint) = match (&up.installer, self.updating) {
+                    (Some(_), true) => (
+                        "Update wird geladen …".to_string(),
+                        "ReVideo startet danach neu",
+                    ),
+                    (Some(_), false) => (
+                        format!("Update {}", up.version),
+                        "Herunterladen und installieren",
+                    ),
+                    (None, _) => (format!("Update {}", up.version), "Download-Seite öffnen"),
+                };
+                let b = button(text(label).size(14))
+                    .padding([6, 14])
+                    .style(theme::primary)
+                    .on_press_maybe((!self.updating).then_some(Message::InstallUpdate));
+                bar.push(tip(b, hint, tooltip::Position::Bottom))
+            }
+            None => bar,
+        };
 
         container(bar)
             .padding([8, 16])

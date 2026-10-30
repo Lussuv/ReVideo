@@ -7,6 +7,7 @@ mod icons;
 mod media;
 mod theme;
 mod timeline;
+mod update;
 
 fn main() -> iced::Result {
     iced::application(app::App::new, app::App::update, app::App::view)

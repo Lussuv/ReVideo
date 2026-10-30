@@ -39,10 +39,8 @@ cargo install --locked watchexec-cli
 
 ### 2. Rust-Toolchain
 
-```sh
-rustup default stable
-rustup target add x86_64-pc-windows-gnu   # für den Windows-Build
-```
+Version und Windows-Target stehen in `rust-toolchain.toml`. rustup installiert beides
+beim ersten `cargo`-Aufruf im Projektordner selbst, es ist nichts weiter zu tun.
 
 ### 3. Starten und testen
 
@@ -52,19 +50,8 @@ Live-Test (speichern → neu bauen → App startet neu, ca. 5 s):
 watchexec -r -e rs,toml -w src -w Cargo.toml -- cargo run
 ```
 
-Im VS-Code-Devcontainer gibt es keine D-Bus-Session und kein xdg-desktop-portal, ohne
-die der Datei-Dialog nicht aufgeht. Einmalig installieren:
-
-```sh
-sudo apt install xdg-desktop-portal xdg-desktop-portal-gtk dbus
-```
-
-Dann den Live-Test über das Skript starten. Es startet beides mit und blendet das
-weitergeleitete X-Display aus („Authorization required“):
-
-```sh
-scripts/dev-container.sh
-```
+Der Datei-Dialog läuft über xdg-desktop-portal. KDE und GNOME bringen es mit, auf
+anderen Desktops `xdg-desktop-portal` plus ein Backend (`-gtk` oder `-kde`) installieren.
 
 Einmal starten, mit oder ohne Datei:
 
@@ -114,6 +101,28 @@ MSYS2-Repository (`ucrt64`) nach `build/windows/sysroot`. Danach wird mit
 nur die tatsächlich importierten DLLs in den Installer. Wenn du `build/windows`
 löschst, holt der nächste Lauf aktuelle Pakete.
 
+### 5. Release veröffentlichen
+
+Der Code liegt privat in `Lussuv/ReVideo`. Die fertigen Pakete kommen in das öffentliche
+[Lussuv/ReVideo-releases](https://github.com/Lussuv/ReVideo-releases), dort fragt die App beim Start nach.
+
+Version in `Cargo.toml` und `packaging/linux/de.retrydev.ReVideo.metainfo.xml` erhöhen,
+committen, auf `main` pushen. GitHub Actions ([release.yml](.github/workflows/release.yml))
+baut dann Flatpak und Installer und legt das Release `v<version>` in `ReVideo-releases` an.
+
+Gebaut wird nur bei neuer Major- oder Minor-Version (`3.1.0`, `4.0.0`). Patch-Versionen
+(`3.1.1`) und schon veröffentlichte Versionen überspringt der Workflow, sie erreichen
+die Nutzer erst mit der nächsten Minor-Version. Voraussetzung ist das Secret `RELEASES_TOKEN`
+im Code-Repo: ein Fine-grained Token nur für `ReVideo-releases` mit
+„Contents: Read and write“.
+
+Von Hand geht es auch: `scripts/build.sh`, dann im Release-Repo ein Release mit Tag
+`v<version>` anlegen und die beiden Dateien aus `dist/` anhängen.
+
+Windows lädt den Installer, prüft ihn gegen die SHA-256, die GitHub beim Hochladen
+berechnet, installiert still und startet neu. Unter Linux öffnet der Update-Knopf die
+Release-Seite.
+
 ## Aufbau
 
 ```
@@ -122,6 +131,7 @@ src/app.rs        Zustand, Update-Logik, Oberfläche
 src/timeline.rs   Trim-Timeline (Canvas)
 src/media.rs      Export, Thumbnails, Frame speichern, Ordner-Navigation, Papierkorb
 src/ffmpeg.rs     ffmpeg/ffprobe-Aufrufe mit Fortschritt
+src/update.rs     Update-Prüfung und -Installation über GitHub-Releases
 src/theme.rs      Retry-Design-Farben und Widget-Stile
 packaging/        Flatpak-Manifest, Desktop-Datei, NSIS-Skript
 scripts/          Build-Skript und Windows-Helfer
