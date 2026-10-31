@@ -63,15 +63,18 @@ private slots:
     void adjacentWrapsAndSkipsExcluded()
     {
         QTemporaryDir dir;
-        for (const char *name : {"a.mp4", "b.MKV", "c.txt", "d.webm"}) {
+        for (const char *name : {"a.mp4", "b.MKV", "c.txt", "d.webm", "e.mp3", "f.FLAC"}) {
             QFile f(dir.filePath(name));
             QVERIFY(f.open(QIODevice::WriteOnly));
         }
         const QString a = dir.filePath("a.mp4");
-        QCOMPARE(adjacentVideo(a, 1, {}), dir.filePath("b.MKV"));
-        QCOMPARE(adjacentVideo(a, -1, {}), dir.filePath("d.webm"));
-        QCOMPARE(adjacentVideo(a, 1, {canonical(dir.filePath("b.MKV"))}), dir.filePath("d.webm"));
-        QCOMPARE(adjacentVideo(dir.filePath("d.webm"), 1, {}), a);
+        QCOMPARE(adjacentMedia(a, 1, {}), dir.filePath("b.MKV"));
+        QCOMPARE(adjacentMedia(a, -1, {}), dir.filePath("d.webm"));
+        QCOMPARE(adjacentMedia(a, 1, {canonical(dir.filePath("b.MKV"))}), dir.filePath("d.webm"));
+        // Videos and songs stay apart.
+        QCOMPARE(adjacentMedia(dir.filePath("d.webm"), 1, {}), a);
+        QCOMPARE(adjacentMedia(dir.filePath("e.mp3"), 1, {}), dir.filePath("f.FLAC"));
+        QCOMPARE(adjacentMedia(dir.filePath("f.FLAC"), 1, {}), dir.filePath("e.mp3"));
     }
 
     void launchFileTakesFirstVideo()
@@ -81,6 +84,9 @@ private slots:
         QVERIFY(f.open(QIODevice::WriteOnly));
         QCOMPARE(launchFile({"revideo", dir.filePath("missing.mp4"), f.fileName()}), f.fileName());
         QCOMPARE(launchFile({"revideo"}), QString());
+        QFile song(dir.filePath("song.mp3"));
+        QVERIFY(song.open(QIODevice::WriteOnly));
+        QCOMPARE(launchFile({"revideo", song.fileName()}), song.fileName());
     }
 
     void twoPassProgressMapping()

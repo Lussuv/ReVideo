@@ -163,6 +163,7 @@ MpvItem::MpvItem(QQuickItem *parent) : QQuickFramebufferObject(parent)
                  {"input-vo-keyboard", "no"},
                  {"osc", "no"},
                  {"osd-level", "0"},
+                 // Music shows the visualizer, never its cover.
                  {"audio-display", "no"},
                  {"load-scripts", "no"},
                  {"ytdl", "no"},
@@ -423,10 +424,13 @@ bool MpvItem::readInfo(int player)
     m_width = int(num("current-tracks/video/demux-w", 0));
     m_height = int(num("current-tracks/video/demux-h", 0));
     m_fps = num("current-tracks/video/demux-fps", num("container-fps", 0));
-    m_codec = str("current-tracks/video/codec");
     m_hasAudio = num("current-tracks/audio/id", -1) >= 0;
+    m_hasVideo = num("current-tracks/video/id", -1) >= 0;
+    m_codec = str(m_hasVideo ? "current-tracks/video/codec" : "current-tracks/audio/codec");
+    m_title = str("media-title");
+    m_artist = str("metadata/by-key/artist");
     emit infoChanged();
-    return num("current-tracks/video/id", -1) >= 0;
+    return m_hasVideo || m_hasAudio;
 }
 
 void MpvItem::processEvents(int player)
@@ -486,7 +490,7 @@ void MpvItem::processEvents(int player)
         case MPV_EVENT_FILE_LOADED:
             m_fileLoaded[player] = true;
             if (!readInfo(player)) {
-                emit loadFailed(QStringLiteral("Keine Videospur gefunden"));
+                emit loadFailed(QStringLiteral("Weder Bild noch Ton gefunden"));
                 unload();
                 break;
             }

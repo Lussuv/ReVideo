@@ -22,7 +22,7 @@ Sheet {
             height: closeBtn.implicitHeight
             Text {
                 anchors.verticalCenter: parent.verticalCenter
-                text: "Videodetails"
+                text: pop.app.audioOnly ? "Musikdetails" : "Videodetails"
                 color: Theme.tx2
                 font.pixelSize: 13
                 font.weight: Font.DemiBold
@@ -39,6 +39,7 @@ Sheet {
         }
         Line { icon: "file"; value: Util.fileName(pop.player.path) }
         Line {
+            visible: pop.player.hasVideo
             icon: "frame"
             value: pop.player.videoWidth + " × " + pop.player.videoHeight
                    + " (" + Util.aspectRatio(pop.player.videoWidth, pop.player.videoHeight) + ")"
@@ -48,7 +49,9 @@ Sheet {
         Rectangle { width: parent.width; height: 1; color: Theme.lnSoft }
         Kv { k: "Codec"; v: pop.player.codec.toUpperCase() }
         Kv { k: "Container"; v: "." + Util.suffix(pop.player.path) }
-        Kv { k: "Framerate"; v: pop.player.fps.toFixed(2) + " fps" }
+        Kv { k: "Framerate"; v: pop.player.fps.toFixed(2) + " fps"; visible: pop.player.hasVideo }
+        Kv { k: "Titel"; v: pop.player.title; visible: pop.app.audioOnly }
+        Kv { k: "Interpret"; v: pop.player.artist; visible: pop.app.audioOnly && v !== "" }
         Kv { k: "Audio"; v: pop.player.hasAudio ? "Ja" : "Nein" }
     }
 

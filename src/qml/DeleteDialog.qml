@@ -25,7 +25,7 @@ Rectangle {
             width: 420
             spacing: 8
 
-            Text { text: "Video löschen?"; color: Theme.tx; font.pixelSize: 19; font.weight: Font.DemiBold }
+            Text { text: "Datei löschen?"; color: Theme.tx; font.pixelSize: 19; font.weight: Font.DemiBold }
             Text {
                 width: parent.width
                 text: "„" + Util.fileName(dlg.app.player.path) + "“ in den Papierkorb verschieben?"

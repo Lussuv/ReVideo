@@ -21,15 +21,26 @@ const QStringList &videoExtensions()
     return exts;
 }
 
+const QStringList &audioExtensions()
+{
+    static const QStringList exts = {"mp3", "m4a", "aac", "wav", "flac", "ogg", "opus", "wma"};
+    return exts;
+}
+
 bool isVideoFile(const QString &path)
 {
     return videoExtensions().contains(QFileInfo(path).suffix().toLower());
 }
 
+bool isAudioFile(const QString &path)
+{
+    return audioExtensions().contains(QFileInfo(path).suffix().toLower());
+}
+
 QString launchFile(const QStringList &args)
 {
     for (const QString &arg : args.mid(1)) {
-        if (QFileInfo(arg).isFile() && isVideoFile(arg))
+        if (QFileInfo(arg).isFile() && (isVideoFile(arg) || isAudioFile(arg)))
             return QFileInfo(arg).absoluteFilePath();
     }
     return {};
@@ -41,12 +52,13 @@ QString canonical(const QString &path)
     return c.isEmpty() ? QFileInfo(path).absoluteFilePath() : c;
 }
 
-QString adjacentVideo(const QString &current, int direction, const QSet<QString> &excluded)
+QString adjacentMedia(const QString &current, int direction, const QSet<QString> &excluded)
 {
     const QFileInfo cur(current);
+    const auto sameKind = isAudioFile(current) ? isAudioFile : isVideoFile;
     QFileInfoList videos;
     for (const QFileInfo &fi : cur.dir().entryInfoList(QDir::Files))
-        if (isVideoFile(fi.fileName()))
+        if (sameKind(fi.fileName()))
             videos.append(fi);
     std::sort(videos.begin(), videos.end(), [](const QFileInfo &a, const QFileInfo &b) {
         return a.fileName().toLower() < b.fileName().toLower();

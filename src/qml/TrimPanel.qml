@@ -90,6 +90,7 @@ Sheet {
             spacing: 8
 
             Btn {
+                visible: !panel.app.audioOnly
                 variant: "secondary"
                 iconName: "plus"
                 text: "Clip hinzufügen"
@@ -132,6 +133,7 @@ Sheet {
 
             Row {
                 anchors.fill: parent
+                visible: !panel.app.audioOnly
                 Repeater {
                     model: panel.app.thumbCount
                     Image {
@@ -141,6 +143,35 @@ Sheet {
                         source: panel.app.thumbnails[index] ?? ""
                         fillMode: Image.PreserveAspectCrop
                         asynchronous: true
+                    }
+                }
+            }
+
+            // A song: its waveform over the whole length, mirrored around the middle.
+            Canvas {
+                id: wave
+                readonly property var paintKey: [width, height, panel.app.trackPeaks]
+                anchors.fill: parent
+                visible: panel.app.audioOnly
+                onPaintKeyChanged: requestPaint()
+                onPaint: {
+                    const ctx = getContext("2d")
+                    ctx.reset()
+                    const peaks = panel.app.trackPeaks
+                    if (!peaks || peaks.length === 0)
+                        return
+                    ctx.fillStyle = Theme.aText
+                    ctx.globalAlpha = 0.7
+                    const mid = height / 2, amp = height / 2 - 6
+                    // 2 px bars with 1 px gaps; each takes the loudest bucket under it.
+                    for (let px = 0; px < width; px += 3) {
+                        const from = Math.floor(px / width * peaks.length)
+                        const to = Math.max(Math.floor((px + 3) / width * peaks.length), from + 1)
+                        let peak = 0
+                        for (let i = from; i < Math.min(to, peaks.length); i++)
+                            peak = Math.max(peak, peaks[i])
+                        const h = Math.max(peak * amp, 0.5)
+                        ctx.fillRect(px, mid - h, 2, 2 * h)
                     }
                 }
             }

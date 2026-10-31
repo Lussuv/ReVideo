@@ -35,6 +35,11 @@ class MpvItem : public QQuickFramebufferObject {
     Q_PROPERTY(double fps READ fps NOTIFY infoChanged)
     Q_PROPERTY(QString codec READ codec NOTIFY infoChanged)
     Q_PROPERTY(bool hasAudio READ hasAudio NOTIFY infoChanged)
+    /// False for music; its cover is not shown.
+    Q_PROPERTY(bool hasVideo READ hasVideo NOTIFY infoChanged)
+    /// From the tags; the title falls back to the file name.
+    Q_PROPERTY(QString title READ title NOTIFY infoChanged)
+    Q_PROPERTY(QString artist READ artist NOTIFY infoChanged)
 
 public:
     explicit MpvItem(QQuickItem *parent = nullptr);
@@ -62,6 +67,9 @@ public:
     double fps() const { return m_fps; }
     QString codec() const { return m_codec; }
     bool hasAudio() const { return m_hasAudio; }
+    bool hasVideo() const { return m_hasVideo; }
+    QString title() const { return m_title; }
+    QString artist() const { return m_artist; }
 
     /// Player whose picture is shown; the renderer takes it over in synchronize().
     int activePlayer() const { return m_active; }
@@ -101,7 +109,7 @@ signals:
 private:
     Q_INVOKABLE void renderReady();
     void processEvents(int player);
-    /// False if the file has no video track.
+    /// False if the file has neither video nor audio.
     bool readInfo(int player);
     mpv_handle *handle(int player) const { return m_mpv[player].get(); }
     /// Opens sequence entry `entry` on `player`, paused or not.
@@ -148,4 +156,7 @@ private:
     double m_fps = 0;
     QString m_codec;
     bool m_hasAudio = false;
+    bool m_hasVideo = false;
+    QString m_title;
+    QString m_artist;
 };

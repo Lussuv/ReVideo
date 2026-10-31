@@ -51,7 +51,7 @@ Rectangle {
         Btn {
             iconName: "camera"
             text: "Frame speichern"
-            enabled: bar.has
+            enabled: bar.has && !bar.app.audioOnly
             verticalPadding: 7
             horizontalPadding: 12
             onClicked: bar.app.saveFrame()
@@ -73,7 +73,7 @@ Rectangle {
         Btn {
             variant: "tabDanger"
             iconName: "trash"
-            tip: bar.app.clipsOpen ? "Clip entfernen (Entf)" : "Video löschen (Entf)"
+            tip: bar.app.clipsOpen ? "Clip entfernen (Entf)" : "Datei löschen (Entf)"
             enabled: bar.has
             padding: 8
             onClicked: bar.app.askDelete()

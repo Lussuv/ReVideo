@@ -25,6 +25,11 @@ QStringList Util::videoExtensions() const
     return ::videoExtensions();
 }
 
+QStringList Util::audioExtensions() const
+{
+    return ::audioExtensions();
+}
+
 QString Util::formatTime(double sec, bool withMs) const
 {
     return ::formatTime(sec, withMs);
@@ -55,12 +60,12 @@ double Util::tickStep(double duration, double width, double gap) const
     return ::tickStep(duration, width, gap);
 }
 
-QString Util::adjacentVideo(const QString &path, int direction, bool skipSelf) const
+QString Util::adjacentMedia(const QString &path, int direction, bool skipSelf) const
 {
     QSet<QString> excluded;
     if (skipSelf)
         excluded.insert(canonical(path));
-    return ::adjacentVideo(path, direction, excluded);
+    return ::adjacentMedia(path, direction, excluded);
 }
 
 QString Util::moveToTrash(const QString &path) const

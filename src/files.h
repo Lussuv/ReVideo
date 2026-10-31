@@ -7,12 +7,14 @@
 class QProcess;
 
 const QStringList &videoExtensions();
+const QStringList &audioExtensions();
 bool isVideoFile(const QString &path);
-/// First video file passed on the command line (file association / "Open with").
+bool isAudioFile(const QString &path);
+/// First video or audio file passed on the command line (file association / "Open with").
 QString launchFile(const QStringList &args);
-/// Next/previous video in the same folder (alphabetical, wrapping), skipping
-/// `excluded` (canonical paths). Empty if there is none.
-QString adjacentVideo(const QString &current, int direction, const QSet<QString> &excluded);
+/// Next/previous file of the same kind (video or audio) in the same folder
+/// (alphabetical, wrapping), skipping `excluded` (canonical paths). Empty if there is none.
+QString adjacentMedia(const QString &current, int direction, const QSet<QString> &excluded);
 QString canonical(const QString &path);
 /// Empty on success, otherwise a message for the user.
 QString moveToTrash(const QString &path);

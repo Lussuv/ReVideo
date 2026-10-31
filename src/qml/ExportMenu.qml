@@ -31,7 +31,8 @@ Sheet {
         PresetRow {
             preset: 1
             label: "Discord (≤ 10 MB)"
-            desc: "Max. Qualität unter 10 MB • 1080p • 30 fps • 2-Pass"
+            desc: menu.app.audioOnly ? "Nur für Videos" : "Max. Qualität unter 10 MB • 1080p • 30 fps • 2-Pass"
+            enabled: !menu.exporter.running && !menu.app.audioOnly
         }
 
         Column {
@@ -91,6 +92,7 @@ Sheet {
         hoverEnabled: true
         focusPolicy: Qt.NoFocus
         enabled: !menu.exporter.running
+        opacity: enabled ? 1 : 0.5
         topPadding: 9
         bottomPadding: 9
         leftPadding: 12

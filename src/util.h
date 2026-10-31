@@ -12,6 +12,7 @@ class Util : public QObject {
 
     Q_PROPERTY(QString launchFile READ launchFile CONSTANT)
     Q_PROPERTY(QStringList videoExtensions READ videoExtensions CONSTANT)
+    Q_PROPERTY(QStringList audioExtensions READ audioExtensions CONSTANT)
     Q_PROPERTY(double savedVolume READ savedVolume CONSTANT)
     Q_PROPERTY(bool savedMuted READ savedMuted CONSTANT)
 
@@ -20,6 +21,7 @@ public:
 
     QString launchFile() const;
     QStringList videoExtensions() const;
+    QStringList audioExtensions() const;
     double savedVolume() const { return m_volume; }
     bool savedMuted() const { return m_muted; }
 
@@ -31,9 +33,9 @@ public:
     Q_INVOKABLE double snapToFrame(double sec, double frame) const;
     Q_INVOKABLE double tickStep(double duration, double width, double gap) const;
 
-    /// Next/previous video in the folder; `skipSelf` also excludes `path` itself
-    /// (needed after deleting it). Empty if there is none.
-    Q_INVOKABLE QString adjacentVideo(const QString &path, int direction, bool skipSelf) const;
+    /// Next/previous file of the same kind in the folder; `skipSelf` also excludes `path`
+    /// itself (needed after deleting it). Empty if there is none.
+    Q_INVOKABLE QString adjacentMedia(const QString &path, int direction, bool skipSelf) const;
     /// Empty on success.
     Q_INVOKABLE QString moveToTrash(const QString &path) const;
     Q_INVOKABLE double fileSize(const QString &path) const;

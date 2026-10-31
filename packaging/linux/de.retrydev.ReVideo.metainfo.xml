@@ -14,7 +14,9 @@
   <launchable type="desktop-id">de.retrydev.ReVideo.desktop</launchable>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="4.0.0" date="2026-10-31"/>
     <release version="3.9.0" date="2026-10-31"/>
+    <release version="3.8.1" date="2026-10-31"/>
     <release version="3.8.0" date="2026-10-31"/>
     <release version="3.7.0" date="2026-10-31"/>
     <release version="3.6.0" date="2026-10-31"/>

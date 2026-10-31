@@ -5,5 +5,5 @@ Comment=Video-Player und Trimmer
 Exec=revideo %f
 Icon=de.retrydev.ReVideo
 Terminal=false
-Categories=AudioVideo;Video;Player;
-MimeType=video/mp4;video/x-matroska;video/quicktime;video/x-msvideo;video/webm;video/x-flv;video/x-ms-wmv;video/x-m4v;video/mpeg;video/mp2t;video/3gpp;
+Categories=AudioVideo;Video;Audio;Player;
+MimeType=video/mp4;video/x-matroska;video/quicktime;video/x-msvideo;video/webm;video/x-flv;video/x-ms-wmv;video/x-m4v;video/mpeg;video/mp2t;video/3gpp;audio/mpeg;audio/mp4;audio/x-m4a;audio/aac;audio/x-wav;audio/wav;audio/flac;audio/x-flac;audio/ogg;audio/opus;audio/x-ms-wma;

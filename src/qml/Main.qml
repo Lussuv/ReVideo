@@ -107,6 +107,10 @@ ApplicationWindow {
 
     readonly property bool fullscreen: visibility === Window.FullScreen
     readonly property bool hasVideo: player.loaded || switchingClip || sequenceMode
+    /// A song (with or without cover): no frames to save, no clips, no Discord preset.
+    readonly property bool audioOnly: player.loaded && !player.hasVideo && !sequenceMode
+    /// Waveform of the open song for the trim strip: loudest sample per 1/20 s, 0..1.
+    property var trackPeaks: []
     readonly property real duration: player.duration
     readonly property real frame: 1 / (player.fps > 0 ? player.fps : 30)
     readonly property bool controlsVisible: controlsHovered || player.paused || hideTimer.running
@@ -233,7 +237,7 @@ ApplicationWindow {
     function navigate(dir) {
         if (!hasVideo)
             return
-        const next = Util.adjacentVideo(player.path, dir, false)
+        const next = Util.adjacentMedia(player.path, dir, false)
         if (next)
             load(next)
     }
@@ -323,6 +327,8 @@ ApplicationWindow {
         refreshClips()
     }
     function clipProbed(path, info) {
+        if (path === player.path && audioOnly)
+            trackPeaks = info.peaks ?? []
         if (musicTracks.some(pieces => pieces.some(p => p.path === path && p.length === 0))) {
             const ok = info.duration > 0 && info.hasAudio
             if (!ok)
@@ -451,7 +457,7 @@ ApplicationWindow {
         clampMusic()
     }
     function isAudio(path) {
-        return ["mp3", "m4a", "aac", "wav", "flac", "ogg", "opus", "wma"].includes(Util.suffix(path).toLowerCase())
+        return Util.audioExtensions.includes(Util.suffix(path).toLowerCase())
     }
     /// Every song gets a track of its own, below the others.
     function addMusic(paths) {
@@ -690,7 +696,7 @@ ApplicationWindow {
     function confirmDelete() {
         deleteChoice = -1
         pendingDelete = player.path
-        pendingNext = Util.adjacentVideo(player.path, 1, true)
+        pendingNext = Util.adjacentMedia(player.path, 1, true)
         thumbnailer.cancel()
         loading = true
         // mpv has to release the file first; Windows refuses to move open files.
@@ -730,7 +736,15 @@ ApplicationWindow {
             if (c)
                 win.position = start
             win.showControls()
-            win.thumbnailer.start(player.path, player.duration, win.thumbCount)
+            // A song shows its waveform in the trim strip instead of thumbnails.
+            win.trackPeaks = []
+            if (player.hasVideo) {
+                win.thumbnailer.start(player.path, player.duration, win.thumbCount)
+            } else {
+                win.prober.probe(player.path)
+                // Discord is a video profile; a song is exported as it is.
+                win.preset = 0
+            }
         }
         function onLoadFailed(message) {
             win.loading = false
@@ -761,6 +775,11 @@ ApplicationWindow {
                 // A trim end at the very end of the file is reached as end of file.
                 win.seekTo(win.trimStart)
                 player.paused = false
+            } else if (player.eof && win.audioOnly) {
+                // Like a music player: on to the next song in the folder.
+                const next = Util.adjacentMedia(player.path, 1, false)
+                if (next)
+                    win.load(next)
             }
             if (player.eof)
                 win.showControls()
@@ -789,8 +808,12 @@ ApplicationWindow {
 
     FileDialog {
         id: openDialog
-        title: "Video öffnen"
-        nameFilters: ["Video (" + Util.videoExtensions.map(e => "*." + e).join(" ") + ")"]
+        title: "Datei öffnen"
+        nameFilters: [
+            "Video und Musik (" + Util.videoExtensions.concat(Util.audioExtensions).map(e => "*." + e).join(" ") + ")",
+            "Video (" + Util.videoExtensions.map(e => "*." + e).join(" ") + ")",
+            "Musik (" + Util.audioExtensions.map(e => "*." + e).join(" ") + ")"
+        ]
         onAccepted: win.load(Util.urlToPath(selectedFile))
     }
     FileDialog {
@@ -809,7 +832,7 @@ ApplicationWindow {
         id: musicDialog
         title: "Musik wählen"
         fileMode: FileDialog.OpenFiles
-        nameFilters: ["Audio (*.mp3 *.m4a *.aac *.wav *.flac *.ogg *.opus *.wma)"]
+        nameFilters: ["Musik (" + Util.audioExtensions.map(e => "*." + e).join(" ") + ")"]
         onAccepted: {
             const paths = []
             for (let i = 0; i < selectedFiles.length; i++)
@@ -914,6 +937,17 @@ ApplicationWindow {
                 // Letterbox space shows the page surface; only fullscreen keeps black, as players do.
                 background: win.fullscreen ? "black" : Theme.bg
             }
+            // A song: the visualizer instead of a picture.
+            Visualizer {
+                anchors.fill: parent
+                anchors.margins: 24
+                visible: win.audioOnly
+                peaks: win.trackPeaks
+                position: player.position
+                playing: !player.paused && !player.eof
+                title: player.title
+                artist: player.artist
+            }
             MouseArea {
                 anchors.fill: parent
                 enabled: win.hasVideo
@@ -952,7 +986,7 @@ ApplicationWindow {
             Text {
                 anchors.centerIn: parent
                 visible: win.loading
-                text: "Video wird geöffnet …"
+                text: "Wird geöffnet …"
                 color: Theme.tx3
                 font.pixelSize: 15
             }
@@ -969,7 +1003,7 @@ ApplicationWindow {
                 }
                 Text {
                     anchors.horizontalCenter: parent.horizontalCenter
-                    text: "Video öffnen, um zu starten."
+                    text: "Video oder Musik öffnen, um zu starten."
                     color: Theme.tx2
                     font.pixelSize: 17
                 }
