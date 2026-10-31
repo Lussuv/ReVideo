@@ -72,14 +72,18 @@ QStringList frameArgs(const QString &input, double ts, const QString &output)
             "-frames:v", "1", "-update", "1", output};
 }
 
-QStringList thumbnailArgs(const QString &input, double ts, const QString &target, bool fast)
+QStringList thumbnailArgs(const QString &input, const QList<Thumb> &thumbs, bool fast)
 {
     QStringList args = {"-y", "-v", "error"};
-    // Single-threaded on purpose: frame threading makes the decoder fill a frame per
-    // core before the first one comes out (~100 ms instead of ~600 ms per 4K thumbnail).
-    if (fast)
-        args << "-noaccurate_seek" << "-threads" << "1" << "-skip_frame" << "nokey";
-    args << "-ss" << secs(ts) << "-i" << input << "-frames:v" << "1" << "-vf" << "scale=160:-2"
-         << "-q:v" << "5" << "-an" << "-sn" << target;
+    for (const Thumb &t : thumbs) {
+        // Single-threaded on purpose: frame threading makes the decoder fill a frame per
+        // core before the first one comes out (~100 ms instead of ~600 ms per 4K thumbnail).
+        if (fast)
+            args << "-noaccurate_seek" << "-threads" << "1" << "-skip_frame" << "nokey";
+        args << "-ss" << secs(t.ts) << "-i" << input;
+    }
+    for (qsizetype i = 0; i < thumbs.size(); ++i)
+        args << "-map" << QStringLiteral("%1:v:0").arg(i) << "-frames:v" << "1" << "-vf"
+             << "scale=160:-2" << "-q:v" << "5" << thumbs[i].target;
     return args;
 }

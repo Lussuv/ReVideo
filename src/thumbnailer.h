@@ -6,13 +6,14 @@
 
 class QProcess;
 
-/// Extracts evenly spaced thumbnails with ffmpeg, one after another, cached
-/// per file and modification time.
+/// Extracts evenly spaced thumbnails with ffmpeg, cached per file and
+/// modification time: one run for all slots via keyframes, a second, slower
+/// one only for the slots that yielded nothing.
 class Thumbnailer : public QObject {
     Q_OBJECT
     QML_ELEMENT
 
-    /// File URLs in timeline order; grows while the job runs.
+    /// One file URL per slot in timeline order; empty for slots without an image (yet).
     Q_PROPERTY(QStringList thumbnails READ thumbnails NOTIFY thumbnailsChanged)
 
 public:
@@ -29,14 +30,14 @@ signals:
     void thumbnailsChanged();
 
 private:
-    void next();
-    void extract(const QString &target, double ts, bool fast);
+    QString target(int slot) const;
+    void run(bool fast);
+    void publish();
 
     QString m_path;
     QString m_dir;
     double m_duration = 0;
     int m_count = 0;
-    int m_index = 0;
     QProcess *m_proc = nullptr;
     QStringList m_thumbs;
 };

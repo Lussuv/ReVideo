@@ -12,20 +12,17 @@
 void Thumbnailer::start(const QString &path, double duration, int count)
 {
     cancel();
-    m_thumbs.clear();
-    emit thumbnailsChanged();
     const qint64 mtime = QFileInfo(path).lastModified().toSecsSinceEpoch();
     m_dir = tempSubdir("thumbs-" + shortHash(QStringLiteral("%1|%2").arg(path).arg(mtime)));
     m_path = path;
     m_duration = duration;
     m_count = count;
-    m_index = 0;
-    next();
+    publish();
+    run(true);
 }
 
 void Thumbnailer::cancel()
 {
-    m_index = m_count;
     if (m_proc) {
         m_proc->disconnect(this);
         connect(m_proc, &QProcess::finished, m_proc, &QObject::deleteLater);
@@ -34,48 +31,49 @@ void Thumbnailer::cancel()
     }
 }
 
-void Thumbnailer::next()
+QString Thumbnailer::target(int slot) const
 {
-    for (; m_index < m_count; ++m_index) {
-        const QString target = QDir(m_dir).filePath(QString::asprintf("thumb_%03d.jpg", m_index + 1));
-        if (!QFileInfo::exists(target)) {
-            extract(target, m_duration * (m_index + 0.5) / m_count, true);
-            return;
-        }
-        m_thumbs.append(QUrl::fromLocalFile(target).toString());
-        emit thumbnailsChanged();
-    }
+    return QDir(m_dir).filePath(QString::asprintf("thumb_%03d.jpg", slot + 1));
 }
 
-void Thumbnailer::extract(const QString &target, double ts, bool fast)
+void Thumbnailer::run(bool fast)
 {
+    QList<Thumb> missing;
+    for (int i = 0; i < m_count; ++i)
+        if (!QFileInfo::exists(target(i)))
+            missing.append({m_duration * (i + 0.5) / m_count, target(i)});
+    if (missing.isEmpty())
+        return;
+
     auto *proc = new QProcess(this);
     prepareTool(*proc);
     m_proc = proc;
+    // A failed slot (no keyframe after it, seek past the last frame) only means a
+    // missing file; ffmpeg's exit code says nothing about the others.
     const auto done = [=, this] {
         proc->deleteLater();
         m_proc = nullptr;
-        // Without a keyframe before `ts` (short clips, long GOP) the fast path
-        // yields nothing; decode up to `ts` then.
-        if (!QFileInfo::exists(target) && fast) {
-            extract(target, ts, false);
-            return;
-        }
-        // A seek past the last decodable frame yields nothing; skip that slot.
-        if (QFileInfo::exists(target)) {
-            m_thumbs.append(QUrl::fromLocalFile(target).toString());
-            emit thumbnailsChanged();
-        }
-        ++m_index;
-        next();
+        publish();
+        if (fast)
+            run(false);
     };
     connect(proc, &QProcess::finished, this, done);
     connect(proc, &QProcess::errorOccurred, this, [=, this](QProcess::ProcessError e) {
         if (e == QProcess::FailedToStart) {
             proc->deleteLater();
             m_proc = nullptr;
-            m_index = m_count;
         }
     });
-    proc->start(toolPath("ffmpeg"), thumbnailArgs(m_path, ts, target, fast));
+    proc->start(toolPath("ffmpeg"), thumbnailArgs(m_path, missing, fast));
+}
+
+void Thumbnailer::publish()
+{
+    QStringList thumbs;
+    for (int i = 0; i < m_count; ++i)
+        thumbs.append(QFileInfo::exists(target(i)) ? QUrl::fromLocalFile(target(i)).toString() : QString());
+    if (thumbs != m_thumbs) {
+        m_thumbs = thumbs;
+        emit thumbnailsChanged();
+    }
 }

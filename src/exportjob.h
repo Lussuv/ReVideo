@@ -27,5 +27,11 @@ qint64 discordVideoKbps(double duration, bool hasAudio);
 /// The frame at `ts` as PNG; input seeking is frame-exact when re-encoding.
 QStringList frameArgs(const QString &input, double ts, const QString &output);
 
-/// One thumbnail at `ts`. `fast` decodes only the keyframe before `ts`.
-QStringList thumbnailArgs(const QString &input, double ts, const QString &target, bool fast);
+struct Thumb {
+    double ts;
+    QString target;
+};
+/// All `thumbs` from a single ffmpeg run, one input per thumbnail; a process per
+/// thumbnail costs far more, above all on Windows. `fast` decodes only keyframes
+/// and yields nothing for a slot without a keyframe at or after `ts`.
+QStringList thumbnailArgs(const QString &input, const QList<Thumb> &thumbs, bool fast);

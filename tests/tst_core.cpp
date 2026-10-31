@@ -136,9 +136,13 @@ private slots:
         QCOMPARE(QProcess::execute("ffmpeg", discordArgs(src, out, 2, 8, true, 2, passlog)), 0);
         QVERIFY(QFileInfo(out).size() > 0 && QFileInfo(out).size() <= 10'000'000);
 
-        const QString thumb = dir.filePath("t.jpg");
-        QCOMPARE(QProcess::execute("ffmpeg", thumbnailArgs(src, 6, thumb, true)), 0);
-        QVERIFY(QFile::exists(thumb));
+        const QList<Thumb> thumbs = {{2, dir.filePath("t1.jpg")}, {6, dir.filePath("t2.jpg")}};
+        QProcess::execute("ffmpeg", thumbnailArgs(src, thumbs, true));
+        QVERIFY(QFile::exists(thumbs[0].target) && QFile::exists(thumbs[1].target));
+        // Past the last keyframe the fast path yields nothing; the slow one does.
+        const QList<Thumb> late = {{11.9, dir.filePath("t3.jpg")}};
+        QCOMPARE(QProcess::execute("ffmpeg", thumbnailArgs(src, late, false)), 0);
+        QVERIFY(QFile::exists(late[0].target));
     }
 };
 
