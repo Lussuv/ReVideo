@@ -30,8 +30,8 @@ Rectangle {
             onClicked: bar.app.openFile()
         }
         Btn {
-            iconName: "scissors"
-            text: "Trim"
+            iconName: "edit"
+            text: "Bearbeiten"
             active: bar.app.trimOpen
             enabled: bar.has
             verticalPadding: 7
@@ -73,7 +73,7 @@ Rectangle {
         Btn {
             variant: "tabDanger"
             iconName: "trash"
-            tip: "Video löschen (Entf)"
+            tip: bar.app.clipsOpen ? "Clip entfernen (Entf)" : "Video löschen (Entf)"
             enabled: bar.has
             padding: 8
             onClicked: bar.app.askDelete()

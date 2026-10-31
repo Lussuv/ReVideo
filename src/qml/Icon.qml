@@ -30,6 +30,11 @@ Item {
         clock: { stroke: "M3 12 a9 9 0 1 0 18 0 a9 9 0 1 0 -18 0 M12 7 L12 12 L16 14" },
         drive: { stroke: "M3 5 a9 3 0 1 0 18 0 a9 3 0 1 0 -18 0 M3 5 v6 c0 1.66 4.03 3 9 3 s9 -1.34 9 -3 V5 M3 11 v6 c0 1.66 4.03 3 9 3 s9 -1.34 9 -3 v-6" },
         close: { stroke: "M18 6 L6 18 M6 6 L18 18" },
+        plus: { stroke: "M12 5 L12 19 M5 12 L19 12" },
+        pointer: { stroke: "M5 3 L19 11 L12.5 12.5 L9 19 Z" },
+        edit: { stroke: "M4 20 h4 L19 9 a2.1 2.1 0 0 0 -4 -4 L4 16 Z M13.5 6.5 l4 4" },
+        film: { stroke: "M3 5 h18 v14 h-18 Z M7 5 v14 M17 5 v14 M3 9.5 h4 M3 14.5 h4 M17 9.5 h4 M17 14.5 h4" },
+        music: { stroke: "M9 18 V5 l12 -2 v13 M3 18 a3 3 0 1 0 6 0 a3 3 0 1 0 -6 0 M15 16 a3 3 0 1 0 6 0 a3 3 0 1 0 -6 0" },
         camera: { stroke: "M23 19 a2 2 0 0 1 -2 2 H3 a2 2 0 0 1 -2 -2 V8 a2 2 0 0 1 2 -2 h4 l2 -3 h6 l2 3 h4 a2 2 0 0 1 2 2 Z M8 13 a4 4 0 1 0 8 0 a4 4 0 1 0 -8 0" }
     })
     readonly property var icon: paths[name] ?? {}

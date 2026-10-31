@@ -2,6 +2,7 @@
 
 #include <QObject>
 #include <QStringList>
+#include <QVariantList>
 #include <QtQmlIntegration>
 #include <functional>
 
@@ -29,6 +30,13 @@ public:
     Q_INVOKABLE void start(const QString &input, const QString &output, double start, double end,
                            int preset, bool hasAudio);
 
+    /// Joins `clips` (maps with path, start, end, hasAudio, signature, width, height, fps) in
+    /// order: lossless for Original if all signatures match, otherwise re-encoded in the
+    /// format of the first clip. `music` (maps with path, offset, volume, start, length) is
+    /// mixed in.
+    Q_INVOKABLE void startSequence(const QVariantList &clips, const QString &output, int preset,
+                                   const QVariantList &music);
+
     /// Writes the frame shown at `frameStart` (a snapped frame time) as PNG.
     Q_INVOKABLE void saveFrame(const QString &input, double frameStart, double frameDuration,
                                const QString &output);
@@ -41,6 +49,7 @@ signals:
     void finished(const QString &error);
 
 private:
+    void resetProgress(double duration);
     /// Runs one ffmpeg pass whose progress covers `offset..offset+scale` %.
     void run(const QStringList &args, double offset, double scale, std::function<void()> next);
     void finish(const QString &error);

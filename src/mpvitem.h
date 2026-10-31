@@ -1,7 +1,9 @@
 #pragma once
 
 #include <QColor>
+#include <QElapsedTimer>
 #include <QQuickFramebufferObject>
+#include <QVariantList>
 #include <QtQmlIntegration>
 #include <memory>
 
@@ -9,6 +11,8 @@ struct mpv_handle;
 
 /// Video surface backed by libmpv's OpenGL render API. One instance lives for
 /// the whole session; switching videos reuses it instead of rebuilding a pipeline.
+/// It holds two mpv players: a sequence plays on one while the other waits on the
+/// first frame of the next clip, so that changing clips is just switching over.
 class MpvItem : public QQuickFramebufferObject {
     Q_OBJECT
     QML_ELEMENT
@@ -20,6 +24,8 @@ class MpvItem : public QQuickFramebufferObject {
     Q_PROPERTY(double volume READ volume WRITE setVolume NOTIFY volumeChanged)
     Q_PROPERTY(bool muted READ muted WRITE setMuted NOTIFY mutedChanged)
     Q_PROPERTY(QColor background READ background WRITE setBackground NOTIFY backgroundChanged)
+    /// Entry of loadSequence() that is playing; 0 for a single file.
+    Q_PROPERTY(int playlistPos READ playlistPos NOTIFY playlistPosChanged)
 
     // Details of the open file, valid from fileLoaded() on.
     Q_PROPERTY(QString path READ path NOTIFY infoChanged)
@@ -46,6 +52,7 @@ public:
     bool muted() const { return m_muted; }
     void setMuted(bool muted);
     QColor background() const { return m_background; }
+    int playlistPos() const { return m_playlistPos; }
     void setBackground(const QColor &color);
 
     QString path() const { return m_path; }
@@ -56,8 +63,18 @@ public:
     QString codec() const { return m_codec; }
     bool hasAudio() const { return m_hasAudio; }
 
-    /// Opens `path` and starts playback.
-    Q_INVOKABLE void load(const QString &path);
+    /// Player whose picture is shown; the renderer takes it over in synchronize().
+    int activePlayer() const { return m_active; }
+
+    /// Opens `path` at `start` seconds and starts playback.
+    Q_INVOKABLE void load(const QString &path, double start = 0);
+    /// Plays `entries` (maps with path, start, end, muted) back to back, keeping the
+    /// paused state. fileLoaded() follows for every entry.
+    Q_INVOKABLE void loadSequence(const QVariantList &entries);
+    /// Drops the file's audio track (a muted clip), apart from the user's mute.
+    Q_INVOKABLE void setAudioOff(bool off);
+    /// Jumps to entry `index` of the sequence, at its start.
+    Q_INVOKABLE void playIndex(int index);
     /// Closes the file; closed() follows once mpv has released it.
     Q_INVOKABLE void unload();
     /// Frame-exact seek. mpv coalesces seeks that pile up while dragging.
@@ -73,6 +90,7 @@ signals:
     void volumeChanged();
     void mutedChanged();
     void backgroundChanged();
+    void playlistPosChanged();
     void infoChanged();
     void fileLoaded();
     void loadFailed(const QString &error);
@@ -82,11 +100,34 @@ signals:
 
 private:
     Q_INVOKABLE void renderReady();
-    void processEvents();
+    void processEvents(int player);
     /// False if the file has no video track.
-    bool readInfo();
+    bool readInfo(int player);
+    mpv_handle *handle(int player) const { return m_mpv[player].get(); }
+    /// Opens sequence entry `entry` on `player`, paused or not.
+    void loadEntry(int player, int entry, bool paused);
+    /// The waiting player takes over; the other one prepares the entry after it.
+    void switchTo(int player);
+    /// Lets the waiting player prepare `entry`, or stop if there is none.
+    void prepare(int player, int entry);
 
-    std::shared_ptr<mpv_handle> m_mpv;
+    std::shared_ptr<mpv_handle> m_mpv[2];
+    struct Wakeup {
+        MpvItem *item;
+        int player;
+    } m_wakeup[2] = {{this, 0}, {this, 1}};
+    int m_active = 0;
+
+    bool m_sequence = false;
+    QVariantList m_entries;
+    /// Sequence entry each player holds, and whether its first frame is decoded.
+    int m_entry[2] = {-1, -1};
+    bool m_ready[2] = {false, false};
+    /// Whether each player has loaded its entry (fileLoaded may be repeated for a seek).
+    bool m_fileLoaded[2] = {false, false};
+    /// Entry to switch to as soon as the waiting player is ready; -1 none.
+    int m_switchTarget = -1;
+
     bool m_loaded = false;
     double m_position = 0;
     bool m_paused = false;
@@ -94,7 +135,10 @@ private:
     double m_volume = 0.8;
     bool m_muted = false;
     QColor m_background;
+    int m_playlistPos = -1;
     bool m_checkAudio = false;
+    /// From load() to the first frame, for the log.
+    QElapsedTimer m_loadTimer;
     bool m_renderReady = false;
 
     QString m_path;

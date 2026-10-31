@@ -19,34 +19,50 @@ void *getProcAddress(void *, const char *name)
 
 class MpvRenderer : public QQuickFramebufferObject::Renderer {
 public:
-    MpvRenderer(std::shared_ptr<mpv_handle> mpv, MpvItem *item) : m_mpv(std::move(mpv)), m_item(item) {}
+    MpvRenderer(std::shared_ptr<mpv_handle> first, std::shared_ptr<mpv_handle> second, MpvItem *item)
+        : m_mpv{std::move(first), std::move(second)}, m_item(item)
+    {
+    }
 
-    // Runs on the render thread; must happen before the mpv handle goes away,
-    // which the shared handle guarantees.
+    // Runs on the render thread; must happen before the mpv handles go away,
+    // which the shared handles guarantee.
     ~MpvRenderer() override
     {
-        if (m_ctx)
-            mpv_render_context_free(m_ctx);
+        for (mpv_render_context *ctx : m_ctx)
+            if (ctx)
+                mpv_render_context_free(ctx);
     }
 
     QOpenGLFramebufferObject *createFramebufferObject(const QSize &size) override
     {
-        if (!m_ctx)
+        if (!m_ctx[0])
             init();
         return new QOpenGLFramebufferObject(size);
     }
 
+    void synchronize(QQuickFramebufferObject *item) override
+    {
+        m_active = static_cast<MpvItem *>(item)->activePlayer();
+    }
+
     void render() override
     {
-        if (!m_ctx)
-            return;
         QOpenGLFramebufferObject *fbo = framebufferObject();
         mpv_opengl_fbo target{static_cast<int>(fbo->handle()), fbo->width(), fbo->height(), 0};
         int flip = 0;
-        mpv_render_param params[] = {{MPV_RENDER_PARAM_OPENGL_FBO, &target},
-                                     {MPV_RENDER_PARAM_FLIP_Y, &flip},
-                                     {MPV_RENDER_PARAM_INVALID, nullptr}};
-        mpv_render_context_render(m_ctx, params);
+        for (int p = 0; p < 2; ++p) {
+            if (!m_ctx[p])
+                continue;
+            // The waiting player's frames are only acknowledged, so that it does not stall.
+            int skip = p != m_active;
+            if (skip && !(mpv_render_context_update(m_ctx[p]) & MPV_RENDER_UPDATE_FRAME))
+                continue;
+            mpv_render_param params[] = {{MPV_RENDER_PARAM_OPENGL_FBO, &target},
+                                         {MPV_RENDER_PARAM_FLIP_Y, &flip},
+                                         {MPV_RENDER_PARAM_SKIP_RENDERING, &skip},
+                                         {MPV_RENDER_PARAM_INVALID, nullptr}};
+            mpv_render_context_render(m_ctx[p], params);
+        }
     }
 
 private:
@@ -69,79 +85,124 @@ private:
 #endif
 #endif
         params.append({MPV_RENDER_PARAM_INVALID, nullptr});
-        if (mpv_render_context_create(&m_ctx, m_mpv.get(), params.data()) < 0) {
-            qWarning("mpv: Render-Kontext konnte nicht erstellt werden");
-            m_ctx = nullptr;
-            return;
+        for (int p = 0; p < 2; ++p) {
+            if (mpv_render_context_create(&m_ctx[p], m_mpv[p].get(), params.data()) < 0) {
+                qWarning("mpv: Render-Kontext konnte nicht erstellt werden");
+                m_ctx[p] = nullptr;
+                return;
+            }
+            mpv_render_context_set_update_callback(
+                m_ctx[p],
+                [](void *item) {
+                    QMetaObject::invokeMethod(static_cast<MpvItem *>(item), "update", Qt::QueuedConnection);
+                },
+                m_item);
         }
-        mpv_render_context_set_update_callback(
-            m_ctx,
-            [](void *item) {
-                QMetaObject::invokeMethod(static_cast<MpvItem *>(item), "update", Qt::QueuedConnection);
-            },
-            m_item);
         QMetaObject::invokeMethod(m_item, "renderReady", Qt::QueuedConnection);
     }
 
-    std::shared_ptr<mpv_handle> m_mpv;
+    std::shared_ptr<mpv_handle> m_mpv[2];
     MpvItem *m_item;
-    mpv_render_context *m_ctx = nullptr;
+    mpv_render_context *m_ctx[2] = {nullptr, nullptr};
+    int m_active = 0;
 };
+
+/// Named arguments for loadfile: the position of "options" differs between mpv versions.
+void loadFile(mpv_handle *mpv, const QString &path, const QVariantMap &options)
+{
+    QList<QByteArray> keys, values;
+    for (auto it = options.begin(); it != options.end(); ++it) {
+        keys.append(it.key().toUtf8());
+        values.append(it.value().toString().toUtf8());
+    }
+    const auto str = [](QByteArray &v) {
+        mpv_node n{};
+        n.format = MPV_FORMAT_STRING;
+        n.u.string = v.data();
+        return n;
+    };
+    QList<mpv_node> optValues;
+    QList<char *> optKeys;
+    for (qsizetype i = 0; i < keys.size(); ++i) {
+        optValues.append(str(values[i]));
+        optKeys.append(keys[i].data());
+    }
+    mpv_node_list opts{int(keys.size()), optValues.data(), optKeys.data()};
+    mpv_node optsNode{};
+    optsNode.format = MPV_FORMAT_NODE_MAP;
+    optsNode.u.list = &opts;
+
+    QByteArray name = "loadfile", url = path.toUtf8(), flags = "replace";
+    char argKeys[][8] = {"name", "url", "flags", "options"};
+    mpv_node argValues[] = {str(name), str(url), str(flags), optsNode};
+    char *argKeyPtrs[] = {argKeys[0], argKeys[1], argKeys[2], argKeys[3]};
+    mpv_node_list args{4, argValues, argKeyPtrs};
+    mpv_node cmd{};
+    cmd.format = MPV_FORMAT_NODE_MAP;
+    cmd.u.list = &args;
+    mpv_command_node_async(mpv, 0, &cmd);
+}
 
 } // namespace
 
-MpvItem::MpvItem(QQuickItem *parent)
-    : QQuickFramebufferObject(parent), m_mpv(mpv_create(), mpv_terminate_destroy)
+MpvItem::MpvItem(QQuickItem *parent) : QQuickFramebufferObject(parent)
 {
-    if (!m_mpv)
-        qFatal("mpv konnte nicht gestartet werden");
-    mpv_handle *mpv = m_mpv.get();
-    for (const auto &[key, value] : std::initializer_list<std::pair<const char *, const char *>>{
-             {"vo", "libmpv"},
-             {"hwdec", "auto-safe"},
-             // Stay on the last frame at the end instead of closing the file.
-             {"keep-open", "yes"},
-             {"idle", "yes"},
-             {"hr-seek", "yes"},
-             {"input-default-bindings", "no"},
-             {"input-vo-keyboard", "no"},
-             {"osc", "no"},
-             {"osd-level", "0"},
-             {"audio-display", "no"},
-             {"load-scripts", "no"},
-             {"ytdl", "no"},
-         })
-        mpv_set_option_string(mpv, key, value);
-    if (mpv_initialize(mpv) < 0)
-        qFatal("mpv konnte nicht initialisiert werden");
+    for (int p = 0; p < 2; ++p) {
+        m_mpv[p] = std::shared_ptr<mpv_handle>(mpv_create(), mpv_terminate_destroy);
+        if (!m_mpv[p])
+            qFatal("mpv konnte nicht gestartet werden");
+        mpv_handle *mpv = handle(p);
+        for (const auto &[key, value] : std::initializer_list<std::pair<const char *, const char *>>{
+                 {"vo", "libmpv"},
+                 {"hwdec", "auto-safe"},
+                 // Stay on the last frame at the end instead of closing the file.
+                 {"keep-open", "yes"},
+                 {"idle", "yes"},
+                 {"hr-seek", "yes"},
+                 {"input-default-bindings", "no"},
+                 {"input-vo-keyboard", "no"},
+                 {"osc", "no"},
+                 {"osd-level", "0"},
+                 {"audio-display", "no"},
+                 {"load-scripts", "no"},
+                 {"ytdl", "no"},
+             })
+            mpv_set_option_string(mpv, key, value);
+        if (mpv_initialize(mpv) < 0)
+            qFatal("mpv konnte nicht initialisiert werden");
 
-    mpv_request_log_messages(mpv, "error");
-    mpv_observe_property(mpv, TimePos, "time-pos", MPV_FORMAT_DOUBLE);
-    mpv_observe_property(mpv, Pause, "pause", MPV_FORMAT_FLAG);
-    mpv_observe_property(mpv, EofReached, "eof-reached", MPV_FORMAT_FLAG);
-    mpv_set_wakeup_callback(
-        mpv,
-        [](void *self) {
-            auto *item = static_cast<MpvItem *>(self);
-            QMetaObject::invokeMethod(item, [item] { item->processEvents(); }, Qt::QueuedConnection);
-        },
-        this);
+        mpv_request_log_messages(mpv, "error");
+        mpv_observe_property(mpv, TimePos, "time-pos", MPV_FORMAT_DOUBLE);
+        mpv_observe_property(mpv, Pause, "pause", MPV_FORMAT_FLAG);
+        mpv_observe_property(mpv, EofReached, "eof-reached", MPV_FORMAT_FLAG);
+        mpv_set_wakeup_callback(
+            mpv,
+            [](void *data) {
+                const auto *w = static_cast<Wakeup *>(data);
+                MpvItem *item = w->item;
+                const int player = w->player;
+                QMetaObject::invokeMethod(item, [item, player] { item->processEvents(player); }, Qt::QueuedConnection);
+            },
+            &m_wakeup[p]);
+    }
 }
 
 MpvItem::~MpvItem()
 {
-    mpv_set_wakeup_callback(m_mpv.get(), nullptr, nullptr);
+    for (int p = 0; p < 2; ++p)
+        mpv_set_wakeup_callback(handle(p), nullptr, nullptr);
 }
 
 QQuickFramebufferObject::Renderer *MpvItem::createRenderer() const
 {
-    return new MpvRenderer(m_mpv, const_cast<MpvItem *>(this));
+    return new MpvRenderer(m_mpv[0], m_mpv[1], const_cast<MpvItem *>(this));
 }
 
 void MpvItem::setPaused(bool paused)
 {
+    // The waiting player always stays paused.
     int flag = paused;
-    mpv_set_property_async(m_mpv.get(), 0, "pause", MPV_FORMAT_FLAG, &flag);
+    mpv_set_property_async(handle(m_active), 0, "pause", MPV_FORMAT_FLAG, &flag);
     // Callers read the state right after setting it; mpv confirms asynchronously.
     if (m_paused != paused) {
         m_paused = paused;
@@ -152,7 +213,8 @@ void MpvItem::setPaused(bool paused)
 void MpvItem::setVolume(double volume)
 {
     double percent = volume * 100;
-    mpv_set_property_async(m_mpv.get(), 0, "volume", MPV_FORMAT_DOUBLE, &percent);
+    for (int p = 0; p < 2; ++p)
+        mpv_set_property_async(handle(p), 0, "volume", MPV_FORMAT_DOUBLE, &percent);
     if (m_volume != volume) {
         m_volume = volume;
         emit volumeChanged();
@@ -162,7 +224,8 @@ void MpvItem::setVolume(double volume)
 void MpvItem::setMuted(bool muted)
 {
     int flag = muted;
-    mpv_set_property_async(m_mpv.get(), 0, "mute", MPV_FORMAT_FLAG, &flag);
+    for (int p = 0; p < 2; ++p)
+        mpv_set_property_async(handle(p), 0, "mute", MPV_FORMAT_FLAG, &flag);
     if (m_muted != muted) {
         m_muted = muted;
         emit mutedChanged();
@@ -171,7 +234,8 @@ void MpvItem::setMuted(bool muted)
 
 void MpvItem::setBackground(const QColor &color)
 {
-    mpv_set_property_string(m_mpv.get(), "background-color", color.name().toUtf8().constData());
+    for (int p = 0; p < 2; ++p)
+        mpv_set_property_string(handle(p), "background-color", color.name().toUtf8().constData());
     if (m_background != color) {
         m_background = color;
         emit backgroundChanged();
@@ -186,44 +250,165 @@ void MpvItem::renderReady()
         load(m_path);
 }
 
-void MpvItem::load(const QString &path)
+void MpvItem::load(const QString &path, double start)
 {
-    mpv_handle *mpv = m_mpv.get();
     m_path = path;
     // Video initialization fails without a render context; renderReady() catches up.
     if (!m_renderReady)
         return;
+    m_sequence = false;
+    m_switchTarget = -1;
+    prepare(1 - m_active, -1);
+    mpv_handle *mpv = handle(m_active);
     m_checkAudio = true;
+    m_loadTimer.start();
     setLoop(-1, -1);
+    // Opening right at `start` saves a second seek and decoding up to it.
+    mpv_set_property_string(mpv, "start", start > 0 ? QByteArray::number(start, 'f', 6).constData() : "none");
     setPaused(false);
+    if (m_playlistPos != 0) {
+        m_playlistPos = 0;
+        emit playlistPosChanged();
+    }
     const QByteArray file = path.toUtf8();
     const char *cmd[] = {"loadfile", file.constData(), nullptr};
     mpv_command_async(mpv, 0, cmd);
 }
 
+void MpvItem::loadSequence(const QVariantList &entries)
+{
+    if (entries.isEmpty() || !m_renderReady)
+        return;
+    m_sequence = true;
+    m_entries = entries;
+    m_switchTarget = -1;
+    m_entry[0] = m_entry[1] = -1;
+    m_path = entries.first().toMap()["path"].toString();
+    m_checkAudio = true;
+    m_loadTimer.start();
+    setLoop(-1, -1);
+    if (m_eof) {
+        m_eof = false;
+        emit eofChanged();
+    }
+    loadEntry(m_active, 0, m_paused);
+    prepare(1 - m_active, 1);
+}
+
+void MpvItem::loadEntry(int player, int entry, bool paused)
+{
+    const QVariantMap e = m_entries[entry].toMap();
+    mpv_handle *mpv = handle(player);
+    int flag = paused;
+    mpv_set_property(mpv, "pause", MPV_FORMAT_FLAG, &flag);
+    // keep-open would pause at the end of each clip, and that pause could reach us before
+    // the end itself and be taken for the user's: the next clip would start paused.
+    loadFile(mpv, e["path"].toString(),
+             {{"start", QString::number(e["start"].toDouble(), 'f', 6)},
+              {"end", QString::number(e["end"].toDouble(), 'f', 6)},
+              {"aid", e["muted"].toBool() ? "no" : "auto"},
+              {"keep-open-pause", "no"}});
+    m_entry[player] = entry;
+    m_fileLoaded[player] = false;
+    m_ready[player] = false;
+}
+
+void MpvItem::prepare(int player, int entry)
+{
+    if (entry < 0 || entry >= m_entries.size() || !m_sequence) {
+        const char *cmd[] = {"stop", nullptr};
+        mpv_command_async(handle(player), 0, cmd);
+        m_entry[player] = -1;
+        m_ready[player] = false;
+        return;
+    }
+    loadEntry(player, entry, true);
+}
+
+void MpvItem::switchTo(int player)
+{
+    const int other = 1 - player;
+    m_active = player;
+    m_switchTarget = -1;
+    int flag = 1;
+    mpv_set_property_async(handle(other), 0, "pause", MPV_FORMAT_FLAG, &flag);
+    flag = m_paused;
+    mpv_set_property_async(handle(player), 0, "pause", MPV_FORMAT_FLAG, &flag);
+    update();
+
+    const QVariantMap e = m_entries[m_entry[player]].toMap();
+    m_path = e["path"].toString();
+    readInfo(player);
+    m_playlistPos = m_entry[player];
+    emit playlistPosChanged();
+    m_position = e["start"].toDouble();
+    emit positionChanged();
+    if (!m_loaded) {
+        m_loaded = true;
+        emit loadedChanged();
+    }
+    if (m_eof) {
+        m_eof = false;
+        emit eofChanged();
+    }
+    emit fileLoaded();
+    prepare(other, m_entry[player] + 1);
+}
+
+void MpvItem::setAudioOff(bool off)
+{
+    mpv_set_property_string(handle(m_active), "aid", off ? "no" : "auto");
+}
+
+void MpvItem::playIndex(int index)
+{
+    if (!m_sequence || index < 0 || index >= m_entries.size())
+        return;
+    const int other = 1 - m_active;
+    if (m_entry[m_active] == index) {
+        // Already there; a loaded entry announces itself again for the caller's seek.
+        if (m_fileLoaded[m_active])
+            emit fileLoaded();
+        return;
+    }
+    if (m_entry[other] == index) {
+        if (m_ready[other])
+            switchTo(other);
+        else
+            m_switchTarget = index;
+        return;
+    }
+    m_switchTarget = -1;
+    loadEntry(m_active, index, m_paused);
+    prepare(other, index + 1);
+}
+
 void MpvItem::unload()
 {
+    m_sequence = false;
     const char *cmd[] = {"stop", nullptr};
-    mpv_command_async(m_mpv.get(), 0, cmd);
+    mpv_command_async(handle(1 - m_active), 0, cmd);
+    mpv_command_async(handle(m_active), 0, cmd);
 }
 
 void MpvItem::seek(double sec)
 {
     const QByteArray target = QByteArray::number(sec, 'f', 6);
     const char *cmd[] = {"seek", target.constData(), "absolute+exact", nullptr};
-    mpv_command_async(m_mpv.get(), 0, cmd);
+    mpv_command_async(handle(m_active), 0, cmd);
 }
 
 void MpvItem::setLoop(double a, double b)
 {
     const bool on = a >= 0 && b > a;
-    mpv_set_property_string(m_mpv.get(), "ab-loop-a", on ? QByteArray::number(a, 'f', 6).constData() : "no");
-    mpv_set_property_string(m_mpv.get(), "ab-loop-b", on ? QByteArray::number(b, 'f', 6).constData() : "no");
+    mpv_handle *mpv = handle(m_active);
+    mpv_set_property_string(mpv, "ab-loop-a", on ? QByteArray::number(a, 'f', 6).constData() : "no");
+    mpv_set_property_string(mpv, "ab-loop-b", on ? QByteArray::number(b, 'f', 6).constData() : "no");
 }
 
-bool MpvItem::readInfo()
+bool MpvItem::readInfo(int player)
 {
-    mpv_handle *mpv = m_mpv.get();
+    mpv_handle *mpv = handle(player);
     const auto num = [mpv](const char *name, double fallback) {
         double v;
         return mpv_get_property(mpv, name, MPV_FORMAT_DOUBLE, &v) >= 0 ? v : fallback;
@@ -244,19 +429,30 @@ bool MpvItem::readInfo()
     return num("current-tracks/video/id", -1) >= 0;
 }
 
-void MpvItem::processEvents()
+void MpvItem::processEvents(int player)
 {
-    mpv_handle *mpv = m_mpv.get();
+    mpv_handle *mpv = handle(player);
     while (true) {
         mpv_event *ev = mpv_wait_event(mpv, 0);
-        switch (ev->event_id) {
-        case MPV_EVENT_NONE:
+        if (ev->event_id == MPV_EVENT_NONE)
             return;
-        case MPV_EVENT_LOG_MESSAGE: {
+        if (ev->event_id == MPV_EVENT_LOG_MESSAGE) {
             const auto *msg = static_cast<mpv_event_log_message *>(ev->data);
             qWarning("mpv/%s: %s", msg->prefix, QByteArray(msg->text).trimmed().constData());
-            break;
+            continue;
         }
+        // The waiting player only reports when the next clip is ready.
+        if (player != m_active) {
+            if (ev->event_id == MPV_EVENT_FILE_LOADED) {
+                m_fileLoaded[player] = true;
+            } else if (ev->event_id == MPV_EVENT_PLAYBACK_RESTART && m_entry[player] >= 0) {
+                m_ready[player] = true;
+                if (m_switchTarget == m_entry[player])
+                    switchTo(player);
+            }
+            continue;
+        }
+        switch (ev->event_id) {
         case MPV_EVENT_PROPERTY_CHANGE: {
             const auto *p = static_cast<mpv_event_property *>(ev->data);
             if (ev->reply_userdata == TimePos && p->format == MPV_FORMAT_DOUBLE) {
@@ -270,7 +466,17 @@ void MpvItem::processEvents()
                 }
             } else if (ev->reply_userdata == EofReached) {
                 const bool eof = p->format == MPV_FORMAT_FLAG && *static_cast<int *>(p->data);
-                if (eof != m_eof) {
+                const int next = m_entry[player] + 1;
+                if (eof && m_sequence && next < m_entries.size()) {
+                    // A clip of the sequence is over: the next one waits on the other player.
+                    const int other = 1 - player;
+                    if (m_entry[other] == next && m_ready[other])
+                        switchTo(other);
+                    else if (m_entry[other] == next)
+                        m_switchTarget = next;
+                    else
+                        playIndex(next);
+                } else if (eof != m_eof) {
                     m_eof = eof;
                     emit eofChanged();
                 }
@@ -278,10 +484,15 @@ void MpvItem::processEvents()
             break;
         }
         case MPV_EVENT_FILE_LOADED:
-            if (!readInfo()) {
+            m_fileLoaded[player] = true;
+            if (!readInfo(player)) {
                 emit loadFailed(QStringLiteral("Keine Videospur gefunden"));
                 unload();
                 break;
+            }
+            if (m_sequence && m_entry[player] != m_playlistPos) {
+                m_playlistPos = m_entry[player];
+                emit playlistPosChanged();
             }
             m_loaded = true;
             emit loadedChanged();
@@ -299,11 +510,12 @@ void MpvItem::processEvents()
             }
             break;
         case MPV_EVENT_PLAYBACK_RESTART:
+            m_ready[player] = true;
             if (m_checkAudio && m_loaded) {
                 m_checkAudio = false;
                 char *hwdec = mpv_get_property_string(mpv, "hwdec-current");
-                qInfo("mpv: %s %dx%d, Hardware-Dekodierung: %s", qPrintable(m_codec), m_width,
-                      m_height, hwdec ? hwdec : "keine");
+                qInfo("mpv: %s %dx%d, Hardware-Dekodierung: %s, geladen in %lld ms", qPrintable(m_codec),
+                      m_width, m_height, hwdec ? hwdec : "keine", m_loadTimer.elapsed());
                 mpv_free(hwdec);
                 char *ao = mpv_get_property_string(mpv, "current-ao");
                 if (m_hasAudio && !ao)

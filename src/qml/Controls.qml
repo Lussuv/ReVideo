@@ -4,9 +4,12 @@ Sheet {
     id: c
     required property var app
     readonly property var player: app.player
-    // While trimming the bar spans only the trim range, stretched to full width.
-    readonly property real from: app.trimOpen ? app.trimStart : 0
-    readonly property real to: Math.max(app.trimOpen ? app.trimEnd : app.duration, from + 0.01)
+    // While trimming the bar spans only the trim range, stretched to full width; on the
+    // whole timeline it spans all clips.
+    readonly property bool timeline: app.sequenceMode
+    readonly property real from: timeline ? 0 : app.trimOpen ? app.trimStart : 0
+    readonly property real to: Math.max(timeline ? app.clipsTotal : app.trimOpen ? app.trimEnd : app.duration, from + 0.01)
+    readonly property real at: timeline ? app.timelinePosition : app.position
 
     elevation: 2
     color: Qt.alpha(Theme.bg2, 0.92)
@@ -34,10 +37,13 @@ Sheet {
             width: parent.width
             from: c.from
             to: c.to
-            value: Math.min(Math.max(c.app.position, c.from), c.to)
+            value: Math.min(Math.max(c.at, c.from), c.to)
             onMoved: {
                 c.app.beginDrag()
-                c.app.seekTo(value)
+                if (c.timeline)
+                    c.app.seekTimeline(value)
+                else
+                    c.app.seekTo(value)
             }
             onPressedChanged: if (!pressed) c.app.endDrag()
         }
@@ -73,7 +79,7 @@ Sheet {
                 Row {
                     anchors.verticalCenter: parent.verticalCenter
                     Text {
-                        text: Util.formatTime(c.app.position, c.app.trimOpen)
+                        text: Util.formatTime(c.at, c.app.trimOpen)
                         color: Theme.tx
                         font.family: Theme.mono
                         font.pixelSize: 13

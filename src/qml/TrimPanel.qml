@@ -20,6 +20,7 @@ Sheet {
 
         Row {
             anchors.verticalCenter: parent.verticalCenter
+            visible: !panel.app.sequenceMode
             spacing: 10
 
             Text {
@@ -56,19 +57,60 @@ Sheet {
             Text { anchors.verticalCenter: parent.verticalCenter; text: "Länge"; color: Theme.tx3; font.pixelSize: 13 }
         }
 
-        Btn {
-            id: exportBtn
+        Row {
+            anchors.verticalCenter: parent.verticalCenter
+            visible: panel.app.sequenceMode
+            spacing: 10
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                text: "Timeline"
+                color: Theme.tx
+                font.pixelSize: 15
+                font.weight: Font.DemiBold
+            }
+            Item { width: 6; height: 1 }
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                text: Util.formatTime(panel.app.clipsTotal, true)
+                color: Theme.tx
+                font.family: Theme.mono
+                font.pixelSize: 13
+            }
+            Text { anchors.verticalCenter: parent.verticalCenter; text: "Länge"; color: Theme.tx3; font.pixelSize: 13 }
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                text: "· Clip anklicken zum Bearbeiten"
+                color: Theme.tx3
+                font.pixelSize: 13
+            }
+        }
+
+        Row {
             anchors.right: parent.right
-            variant: "secondary"
-            iconName: "upload"
-            text: panel.app.exporter.running ? "Exportiere … " + panel.app.exporter.percent.toFixed(0) + " %" : "Export"
-            verticalPadding: 7
-            horizontalPadding: 14
-            onClicked: panel.app.exportMenuOpen = !panel.app.exportMenuOpen
+            spacing: 8
+
+            Btn {
+                variant: "secondary"
+                iconName: "plus"
+                text: "Clip hinzufügen"
+                verticalPadding: 7
+                horizontalPadding: 14
+                onClicked: panel.app.clipsOpen ? panel.app.pickClips(panel.app.clips.count) : panel.app.openClips()
+            }
+            Btn {
+                id: exportBtn
+                variant: "secondary"
+                iconName: "upload"
+                text: panel.app.exporter.running ? "Exportiere … " + panel.app.exporter.percent.toFixed(0) + " %" : "Export"
+                verticalPadding: 7
+                horizontalPadding: 14
+                onClicked: panel.app.exportMenuOpen = !panel.app.exportMenuOpen
+            }
         }
     }
 
     Item {
+        id: timelineBox
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: header.bottom
@@ -79,6 +121,7 @@ Sheet {
 
         // Same insets as the timeline's track.
         Rectangle {
+            visible: !panel.app.sequenceMode
             x: timeline.handleW
             y: timeline.ticksH
             width: parent.width - 2 * timeline.handleW
@@ -105,8 +148,51 @@ Sheet {
 
         Timeline {
             id: timeline
+            visible: !panel.app.sequenceMode
             anchors.fill: parent
             app: panel.app
+        }
+        SequenceBar {
+            visible: panel.app.sequenceMode
+            anchors.fill: parent
+            app: panel.app
+        }
+    }
+
+    readonly property real clipAreaHeight: clipArea.height
+
+    // Clips and music sit on their own sunken surface, apart from the trim above.
+    Rectangle {
+        id: clipArea
+        visible: panel.app.clipsOpen
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: timelineBox.bottom
+        anchors.leftMargin: 10
+        anchors.rightMargin: 10
+        anchors.topMargin: 14
+        height: strip.implicitHeight + 20
+        radius: Theme.r2
+        color: Theme.bg
+        border.color: Theme.lnSoft
+
+        ClipStrip {
+            id: strip
+            app: panel.app
+            anchors.fill: parent
+            anchors.margins: 10
+        }
+
+        // Closes the whole area, on its corner.
+        Btn {
+            x: parent.width - width / 2 - 4
+            y: -height / 2 + 4
+            variant: "danger"
+            iconName: "close"
+            iconSize: 12
+            padding: 4
+            tip: "Clip-Leiste schließen"
+            onClicked: panel.app.closeClips()
         }
     }
 

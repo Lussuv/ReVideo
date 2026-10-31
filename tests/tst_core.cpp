@@ -6,6 +6,7 @@
 
 #include <QFile>
 #include <QProcess>
+#include <QRegularExpression>
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTest>
@@ -114,6 +115,122 @@ private slots:
         const qint64 kbps = discordVideoKbps(60, true);
         QVERIFY((kbps + 96) * 1000 * 60 / 8 <= 9'300'000);
         QCOMPARE(discordVideoKbps(1e6, false), 50);
+    }
+
+    void parsesMediaInfo()
+    {
+        const QString log = R"(Input #0, mov,mp4,m4a,3gp,3g2,mj2, from 'a.mp4':
+  Duration: 00:01:04.50, start: 0.000000, bitrate: 3226 kb/s
+  Stream #0:0[0x1](und): Video: h264 (High) (avc1 / 0x31637661), yuv420p(progressive), 1280x720 [SAR 1:1 DAR 16:9], 3145 kb/s, 29.97 fps, 29.97 tbr, 15360 tbn (default)
+    Side data:
+      Display Matrix: rotation of -90.00 degrees
+  Stream #0:1[0x2](und): Audio: aac (LC) (mp4a / 0x6134706D), 44100 Hz, mono, fltp, 69 kb/s (default)
+  Stream #0:2: Video: mjpeg (Baseline), yuvj420p(pc), 320x180, 90k tbr (attached pic)
+At least one output file must be specified)";
+        const auto info = parseMediaInfo(log);
+        QVERIFY(info);
+        QCOMPARE(info->duration, 64.5);
+        QCOMPARE(info->width, 720);
+        QCOMPARE(info->height, 1280);
+        QCOMPARE(info->fps, 29.97);
+        QVERIFY(info->hasAudio);
+        QCOMPARE(info->signature, "h264|yuv420p|1280x720|29.97 fps|-90.00|aac|44100 Hz|mono");
+
+        QVERIFY(info->hasVideo);
+        const auto song = parseMediaInfo("  Duration: 00:03:00.00, start: 0.000000\n"
+                                         "  Stream #0:0: Audio: mp3, 44100 Hz, stereo, fltp, 128 kb/s");
+        QVERIFY(song && !song->hasVideo && song->hasAudio);
+        QCOMPARE(song->duration, 180.0);
+        QVERIFY(!parseMediaInfo("At least one output file must be specified"));
+
+        // Two buckets of two samples: peaks 1000 and 4000, scaled to the louder one.
+        const qint16 pcm[] = {100, -1000, 4000, -20};
+        QCOMPARE(waveformPeaks(QByteArray(reinterpret_cast<const char *>(pcm), sizeof pcm), 4, 2),
+                 (QList<float>{0.25f, 1.0f}));
+        QCOMPARE(concatList({{"/v/it's.mp4", 1, 2.5, true}}),
+                 "ffconcat version 1.0\nfile '/v/it'\\''s.mp4'\ninpoint 1.000\noutpoint 2.500\n");
+    }
+
+    /// Joins clips with the real ffmpeg: lossless for equal clips, re-encoded for mixed ones.
+    void concatProducesFiles()
+    {
+        if (QStandardPaths::findExecutable("ffmpeg").isEmpty())
+            QSKIP("ffmpeg nicht gefunden");
+        QTemporaryDir dir;
+        const auto make = [&](const QString &name, const QString &size, bool audio) {
+            QStringList args = {"-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=" + size + ":rate=30"};
+            if (audio)
+                args << "-f" << "lavfi" << "-i" << "sine" << "-c:a" << "aac";
+            args << "-t" << "4" << "-c:v" << "libx264" << "-preset" << "ultrafast" << "-g" << "15" << dir.filePath(name);
+            QCOMPARE(QProcess::execute("ffmpeg", args), 0);
+        };
+        make("a.mp4", "640x360", true);
+        make("b.mp4", "640x360", true);
+        make("c.mp4", "360x640", false);
+        const auto probe = [&](const QString &name) {
+            QProcess p;
+            p.start("ffmpeg", probeArgs(dir.filePath(name)));
+            p.waitForFinished();
+            return parseMediaInfo(QString::fromUtf8(p.readAllStandardError())).value_or(MediaInfo{});
+        };
+        QCOMPARE(probe("a.mp4").signature, probe("b.mp4").signature);
+        QVERIFY(probe("a.mp4").signature != probe("c.mp4").signature);
+
+        const QList<Clip> same = {{dir.filePath("a.mp4"), 1, 3, true}, {dir.filePath("b.mp4"), 0, 2, true}};
+        QFile list(dir.filePath("list.txt"));
+        QVERIFY(list.open(QIODevice::WriteOnly));
+        list.write(concatList(same).toUtf8());
+        list.close();
+        QCOMPARE(QProcess::execute("ffmpeg", QStringList{"-v", "error"} + concatCopyArgs(list.fileName(), dir.filePath("copy.mp4"))), 0);
+        QVERIFY(qAbs(probe("copy.mp4").duration - 4) < 0.6);
+
+        const QList<Clip> mixed = {{dir.filePath("a.mp4"), 1, 3, true}, {dir.filePath("c.mp4"), 0.5, 2, false}};
+        QCOMPARE(QProcess::execute("ffmpeg", QStringList{"-v", "error"} + concatOriginalArgs(mixed, 640, 360, 30, dir.filePath("orig.mp4"))), 0);
+        const MediaInfo orig = probe("orig.mp4");
+        QVERIFY(qAbs(orig.duration - 3.5) < 0.1);
+        QCOMPARE(orig.width, 640);
+        QVERIFY(orig.hasAudio);
+
+        const QString passlog = dir.filePath("p"), out = dir.filePath("discord.mp4");
+        QCOMPARE(QProcess::execute("ffmpeg", QStringList{"-v", "error"} + concatDiscordArgs(mixed, 640, 360, 1, passlog, out)), 0);
+        QCOMPARE(QProcess::execute("ffmpeg", QStringList{"-v", "error"} + concatDiscordArgs(mixed, 640, 360, 2, passlog, out)), 0);
+        QVERIFY(qAbs(probe("discord.mp4").duration - 3.5) < 0.1);
+
+        // Music: lossless video with mixed audio, and re-encoded clips without own audio.
+        QCOMPARE(QProcess::execute("ffmpeg", {"-v", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=880",
+                                              "-t", "10", "-c:a", "aac", dir.filePath("song.m4a")}),
+                 0);
+        const Music late{dir.filePath("song.m4a"), 1.5, 0.5};
+        // Two pieces of one song, as after a cut: 1 s from 6 s at 0, the rest of it from 2.5 s.
+        const QList<Music> pieces = {{dir.filePath("song.m4a"), 0, 1, 6, 1}, {dir.filePath("song.m4a"), 2.5, 1, 7, -1}};
+        QCOMPARE(QProcess::execute("ffmpeg", QStringList{"-v", "error"}
+                                                 + concatCopyArgs(list.fileName(), dir.filePath("music.mp4"), pieces, true, 4)),
+                 0);
+        const MediaInfo withMusic = probe("music.mp4");
+        QVERIFY(withMusic.hasAudio && qAbs(withMusic.duration - 4) < 0.6);
+
+        // The second clip muted: its two seconds are silent, the first clip's are not.
+        QCOMPARE(QProcess::execute("ffmpeg", QStringList{"-v", "error"}
+                                                 + concatCopyArgs(list.fileName(), dir.filePath("muted.mp4"), {}, true, 4,
+                                                                  {{2, 4}})),
+                 0);
+        QProcess silence;
+        silence.start("ffmpeg", {"-i", dir.filePath("muted.mp4"), "-af", "silencedetect=n=-50dB:d=1", "-f", "null", "-"});
+        silence.waitForFinished();
+        const QString detected = QString::fromUtf8(silence.readAllStandardError());
+        const auto start = QRegularExpression(R"(silence_start: ([\d.]+))").match(detected);
+        QVERIFY2(start.hasMatch() && qAbs(start.captured(1).toDouble() - 2) < 0.05, qPrintable(detected.right(400)));
+        const Music early{dir.filePath("song.m4a"), -3, 1};
+        const QList<Clip> silent = {{dir.filePath("c.mp4"), 0, 3, false}};
+        QCOMPARE(QProcess::execute("ffmpeg", QStringList{"-v", "error"}
+                                                 + concatOriginalArgs(silent, 360, 640, 30, dir.filePath("sm.mp4"), {early, late})),
+                 0);
+        const MediaInfo silentMusic = probe("sm.mp4");
+        QVERIFY(silentMusic.hasAudio && qAbs(silentMusic.duration - 3) < 0.1);
+        QCOMPARE(QProcess::execute("ffmpeg", QStringList{"-v", "error"}
+                                                 + concatDiscordArgs(mixed, 640, 360, 2, passlog, out, {late})),
+                 0);
+        QVERIFY(qAbs(probe("discord.mp4").duration - 3.5) < 0.1);
     }
 
     /// Runs the real ffmpeg with both presets; skipped without ffmpeg/libx264 on PATH.

@@ -18,11 +18,7 @@ void Exporter::start(const QString &input, const QString &output, double start, 
         return;
     }
     const double duration = end - start;
-    m_durationUs = qint64(duration * 1e6);
-    m_percent = 0;
-    m_speed.clear();
-    m_eta = 0;
-    emit progressChanged();
+    resetProgress(duration);
 
     if (Preset(preset) == Preset::Original) {
         run(originalArgs(input, output, start, duration), 0, 100, [this] { finish({}); });
@@ -38,6 +34,77 @@ void Exporter::start(const QString &input, const QString &output, double start, 
             finish({});
         });
     });
+}
+
+void Exporter::startSequence(const QVariantList &clips, const QString &output, int preset,
+                             const QVariantList &music)
+{
+    if (m_proc || clips.isEmpty())
+        return;
+    QList<Clip> list;
+    QList<Span> mutes;
+    double duration = 0;
+    bool same = true;
+    const QVariantMap first = clips.first().toMap();
+    for (const QVariant &v : clips) {
+        const QVariantMap m = v.toMap();
+        // A muted clip counts as one without audio: re-encoded it gets silence.
+        const bool muted = m["muted"].toBool();
+        list.append({m["path"].toString(), m["start"].toDouble(), m["end"].toDouble(),
+                     m["hasAudio"].toBool() && !muted});
+        const double length = list.last().end - list.last().start;
+        if (muted)
+            mutes.append({duration, duration + length});
+        duration += length;
+        same = same && m["signature"] == first["signature"];
+    }
+    resetProgress(duration);
+    const int width = first["width"].toInt(), height = first["height"].toInt();
+    QList<Music> songs;
+    for (const QVariant &v : music) {
+        const QVariantMap m = v.toMap();
+        songs.append({m["path"].toString(), m["offset"].toDouble(), m["volume"].toDouble(),
+                      m["start"].toDouble(), m["length"].toDouble()});
+    }
+
+    if (Preset(preset) == Preset::Original && same) {
+        const QString listFile = QDir(tempSubdir("concat")).filePath("list-" + shortHash(output) + ".txt");
+        QFile file(listFile);
+        if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+            finish(QStringLiteral("Clip-Liste konnte nicht geschrieben werden: %1").arg(file.errorString()));
+            return;
+        }
+        file.write(concatList(list).toUtf8());
+        file.close();
+        run(concatCopyArgs(listFile, output, songs, first["hasAudio"].toBool(), duration, mutes), 0, 100,
+            [=, this] {
+                QFile::remove(listFile);
+                finish({});
+            });
+    } else if (Preset(preset) == Preset::Original) {
+        const double fps = first["fps"].toDouble();
+        run(concatOriginalArgs(list, width, height, fps > 0 ? fps : 30, output, songs), 0, 100,
+            [this] { finish({}); });
+    } else {
+        const QString passlog = QDir(tempSubdir("2pass")).filePath("p-" + shortHash(output));
+        const auto pass = [=](int n) { return concatDiscordArgs(list, width, height, n, passlog, output, songs); };
+        run(pass(1), 0, 50, [=, this] {
+            run(pass(2), 50, 50, [=, this] {
+                QFile::remove(passlog + "-0.log");
+                QFile::remove(passlog + "-0.log.mbtree");
+                finish({});
+            });
+        });
+    }
+}
+
+void Exporter::resetProgress(double duration)
+{
+    m_durationUs = qint64(duration * 1e6);
+    m_percent = 0;
+    m_speed.clear();
+    m_eta = 0;
+    emit progressChanged();
 }
 
 void Exporter::run(const QStringList &args, double offset, double scale, std::function<void()> next)

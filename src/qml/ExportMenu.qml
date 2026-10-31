@@ -23,7 +23,10 @@ Sheet {
         PresetRow {
             preset: 0
             label: "Original"
-            desc: "Quell-Codec & Container, verlustfreier Schnell-Trim"
+            desc: !menu.app.joining ? "Quell-Codec & Container, verlustfreier Schnell-Trim"
+                  : menu.app.clipsMatch && menu.app.hasMusic ? "Bild verlustfrei, Ton mit Musik neu gemischt"
+                  : menu.app.clipsMatch ? "Clips verlustfrei aneinandergehängt, Schnitt auf Keyframes"
+                  : "Clips verschieden: H.264 im Format des ersten Clips"
         }
         PresetRow {
             preset: 1
