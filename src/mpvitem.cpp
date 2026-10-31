@@ -301,6 +301,10 @@ void MpvItem::processEvents()
         case MPV_EVENT_PLAYBACK_RESTART:
             if (m_checkAudio && m_loaded) {
                 m_checkAudio = false;
+                char *hwdec = mpv_get_property_string(mpv, "hwdec-current");
+                qInfo("mpv: %s %dx%d, Hardware-Dekodierung: %s", qPrintable(m_codec), m_width,
+                      m_height, hwdec ? hwdec : "keine");
+                mpv_free(hwdec);
                 char *ao = mpv_get_property_string(mpv, "current-ao");
                 if (m_hasAudio && !ao)
                     emit noAudioOutput();
@@ -309,8 +313,10 @@ void MpvItem::processEvents()
             break;
         case MPV_EVENT_END_FILE: {
             const auto *end = static_cast<mpv_event_end_file *>(ev->data);
-            if (end->reason == MPV_END_FILE_REASON_ERROR)
+            if (end->reason == MPV_END_FILE_REASON_ERROR) {
+                qWarning("mpv: %s nicht abspielbar: %s", qPrintable(m_path), mpv_error_string(end->error));
                 emit loadFailed(QStringLiteral("Wiedergabe nicht möglich: %1").arg(mpv_error_string(end->error)));
+            }
             if (m_loaded) {
                 m_loaded = false;
                 emit loadedChanged();
