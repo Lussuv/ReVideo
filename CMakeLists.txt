@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
-project(ReVideo VERSION 3.7.0 DESCRIPTION "Video-Player und Trimmer" LANGUAGES CXX)
+project(ReVideo VERSION 3.8.0 DESCRIPTION "Video-Player und Trimmer" LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -34,7 +34,9 @@ qt_add_executable(revideo src/main.cpp)
 set_target_properties(revideo PROPERTIES WIN32_EXECUTABLE ON)
 if(WIN32)
     set_target_properties(revideo PROPERTIES OUTPUT_NAME ReVideo)
-    target_sources(revideo PRIVATE packaging/windows/revideo.rc)
+    set(ICON_PATH ${CMAKE_SOURCE_DIR}/assets/icon.ico)
+    configure_file(packaging/windows/revideo.rc.in revideo.rc @ONLY)
+    target_sources(revideo PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/revideo.rc)
 endif()
 target_compile_definitions(revideo PRIVATE APP_VERSION="${PROJECT_VERSION}")
 

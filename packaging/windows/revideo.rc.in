@@ -1,0 +1,30 @@
+// Icon and version info of ReVideo.exe. Windows shows FileDescription as the app
+// name (Task Manager, volume mixer, "Open with"); without it, the file name appears.
+#include <winver.h>
+
+IDI_ICON1 ICON "@ICON_PATH@"
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,0
+PRODUCTVERSION @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,0
+FILEOS VOS_NT_WINDOWS32
+FILETYPE VFT_APP
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040704b0"
+        BEGIN
+            VALUE "CompanyName", "Retry"
+            VALUE "FileDescription", "ReVideo"
+            VALUE "FileVersion", "@PROJECT_VERSION@"
+            VALUE "InternalName", "ReVideo"
+            VALUE "OriginalFilename", "ReVideo.exe"
+            VALUE "ProductName", "ReVideo"
+            VALUE "ProductVersion", "@PROJECT_VERSION@"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x407, 1200
+    END
+END
