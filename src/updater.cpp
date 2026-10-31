@@ -149,8 +149,10 @@ void Updater::installDownloaded(const QString &file)
             fail(QStringLiteral("Flatpak konnte nicht gestartet werden: %1").arg(proc->errorString()));
         }
     });
+    // No --noninteractive: it also forbids polkit's password prompt, which a system
+    // installation needs ("InstallBundle not allowed for user"). -y answers the rest.
     proc->start("flatpak-spawn", {"--host", "flatpak", "install", user ? "--user" : "--system",
-                                  "--noninteractive", "-y", "--bundle", file});
+                                  "-y", "--bundle", file});
 #endif
 }
 
