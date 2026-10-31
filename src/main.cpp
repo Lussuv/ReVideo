@@ -72,6 +72,11 @@ int main(int argc, char *argv[])
     QGuiApplication::setFont(QFont("Inter"));
 
     QQmlApplicationEngine engine;
+#ifdef Q_OS_WIN
+    // windeployqt puts the QML modules into bin\qml; MSYS2's Qt only looks in
+    // share\qt6\qml relative to its own install, which the installer does not have.
+    engine.addImportPath(QCoreApplication::applicationDirPath() + "/qml");
+#endif
     QObject::connect(
         &engine, &QQmlApplicationEngine::objectCreationFailed, &app,
         [logPath] {
