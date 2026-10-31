@@ -76,8 +76,9 @@ bool inFlatpak()
 /// would hide files in a private trash; the portal uses the real one.
 static QString portalTrash(const QString &path)
 {
+    // The portal only trashes files the sandbox could write itself, proven by the fd.
     QFile file(path);
-    if (!file.open(QIODevice::ReadOnly))
+    if (!file.open(QIODevice::ReadWrite | QIODevice::ExistingOnly))
         return file.errorString();
     auto msg = QDBusMessage::createMethodCall(
         "org.freedesktop.portal.Desktop", "/org/freedesktop/portal/desktop",
@@ -86,7 +87,13 @@ static QString portalTrash(const QString &path)
     const QDBusMessage reply = QDBusConnection::sessionBus().call(msg);
     if (reply.type() == QDBusMessage::ErrorMessage)
         return reply.errorMessage();
-    return reply.arguments().value(0).toUInt() == 1 ? QString() : QStringLiteral("Portal hat abgelehnt");
+    // The portal gives no reason; besides missing write access it refuses a trash
+    // directory that is not mode 700 (seen with KDE-created ones).
+    return reply.arguments().value(0).toUInt() == 1
+               ? QString()
+               : QStringLiteral("Portal hat abgelehnt. Falls das immer passiert: "
+                                "chmod 700 ~/.local/share/Trash ~/.local/share/Trash/files "
+                                "~/.local/share/Trash/info");
 }
 #endif
 
