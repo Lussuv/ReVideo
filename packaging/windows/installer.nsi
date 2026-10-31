@@ -60,9 +60,28 @@ VIAddVersionKey "LegalCopyright" "Retry"
 !macroend
 
 Section "Install"
-  ; Silent = in-app update: give the calling ReVideo.exe time to exit and release its files.
-  IfSilent 0 +2
-    Sleep 2000
+  ; Wait until ReVideo has exited: replacing the files of a running instance leaves a
+  ; half-installed bin folder. After an in-app update the caller closes itself, the
+  ; GStreamer-based versions up to 3.3 can take a few seconds for it. A running exe
+  ; cannot be deleted, so the delete doubles as the check (max. 30 s, then ask/abort).
+  StrCpy $0 0
+  wait_exit:
+    ClearErrors
+    Delete "$INSTDIR\bin\ReVideo.exe"
+    Delete "$INSTDIR\bin\ffmpeg.exe"
+    IfErrors 0 exited
+    IntOp $0 $0 + 1
+    IntCmp $0 60 timeout still_running timeout
+  timeout:
+    IfSilent 0 +2
+      Abort
+    MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "ReVideo läuft noch. Bitte schließen und dann „Wiederholen“ wählen." IDRETRY +2
+    Abort
+    StrCpy $0 0
+  still_running:
+    Sleep 500
+    Goto wait_exit
+  exited:
   ; Old files of a previous version must not mix with the new ones (also removes
   ; the GStreamer tree of versions before 3.4).
   RMDir /r "$INSTDIR\bin"
