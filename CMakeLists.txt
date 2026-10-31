@@ -58,6 +58,7 @@ qt_add_qml_module(revideo
         src/qml/ExportMenu.qml
         src/qml/InfoPopover.qml
         src/qml/DeleteDialog.qml
+        src/qml/UpdateDialog.qml
     SOURCES
         src/mpvitem.cpp src/mpvitem.h
         src/util.cpp src/util.h

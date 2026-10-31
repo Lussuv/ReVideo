@@ -47,6 +47,8 @@ ApplicationWindow {
     property string pendingDelete: ""
     property string pendingNext: ""
     property bool controlsHovered: false
+    property bool updatePromptDismissed: false
+    readonly property bool updatePromptOpen: updater.available && !updater.busy && !updatePromptDismissed
 
     readonly property bool fullscreen: visibility === Window.FullScreen
     readonly property bool hasVideo: player.loaded
@@ -230,6 +232,11 @@ ApplicationWindow {
         frameDialog.open()
     }
 
+    function installUpdate() {
+        updatePromptDismissed = true
+        updater.install()
+    }
+
     function askDelete() {
         if (hasVideo && !exporter.running)
             deleteChoice = 1
@@ -330,9 +337,11 @@ ApplicationWindow {
     Shortcut { sequence: "F11"; enabled: win.deleteChoice < 0; onActivated: win.toggleFullscreen() }
     Shortcut {
         sequence: "Esc"
-        enabled: win.deleteChoice >= 0 || win.fullscreen
+        enabled: win.updatePromptOpen || win.deleteChoice >= 0 || win.fullscreen
         onActivated: {
-            if (win.deleteChoice >= 0)
+            if (win.updatePromptOpen)
+                win.updatePromptDismissed = true
+            else if (win.deleteChoice >= 0)
                 win.deleteChoice = -1
             else
                 win.toggleFullscreen()
@@ -515,5 +524,11 @@ ApplicationWindow {
         app: win
         anchors.fill: parent
         visible: win.deleteChoice >= 0 && win.hasVideo
+    }
+
+    UpdateDialog {
+        app: win
+        anchors.fill: parent
+        visible: win.updatePromptOpen
     }
 }
