@@ -61,9 +61,11 @@ jobs:
       - run: >-
           tar -cf "ReVideo-$VERSION-linux-sources.tar" packaging/linux/de.retrydev.ReVideo.yml
           -C .flatpak-builder downloads git
+      # Artefakte reichen nur bis zum publish-Job; länger aufbewahrt füllen sie das Speicherkontingent.
       - uses: actions/upload-artifact@v7
         with:
           name: flatpak
+          retention-days: 1
           path: |
             ReVideo-${{ needs.version.outputs.version }}-x86_64.flatpak
             ReVideo-${{ needs.version.outputs.version }}-linux-sources.tar
@@ -113,6 +115,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: windows
+          retention-days: 1
           path: dist/*
 
   publish:

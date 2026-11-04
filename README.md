@@ -21,6 +21,9 @@ Die aktuelle Version gibt es unter
 
 Die App sucht beim Start nach Updates und installiert sie auf Wunsch.
 
+Die Windows-Programme werden über die [SignPath Foundation](https://signpath.org) signiert
+(siehe [Code signing policy](#code-signing-policy)).
+
 ## Selbst bauen (Linux)
 
 Arch / CachyOS:
@@ -48,6 +51,25 @@ build/linux/revideo ~/Videos/clip.mkv
 
 Die offiziellen Pakete baut GitHub Actions ([release.yml](.github/workflows/release.yml)),
 den Windows-Build in MSYS2 mit [scripts/build-windows.sh](scripts/build-windows.sh).
+
+## Code signing policy
+
+Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by
+[SignPath Foundation](https://signpath.org).
+
+- Committers and reviewers: [Lussuv](https://github.com/Lussuv)
+- Approvers: [Lussuv](https://github.com/Lussuv)
+
+Signiert werden nur Programme, die GitHub Actions aus diesem Repository baut. Jede
+Signatur wird vorher einzeln freigegeben.
+
+## Datenschutz
+
+ReVideo sammelt keine Daten und sendet nichts über die Nutzung. Die einzige
+Netzwerkverbindung ist die Update-Prüfung beim Start: Die App fragt bei der GitHub-API
+(`api.github.com`) die neueste Version ab und lädt ein Update erst nach Bestätigung von
+GitHub herunter. Dabei sieht GitHub die IP-Adresse, wie bei jedem Seitenaufruf
+([Datenschutzerklärung von GitHub](https://docs.github.com/de/site-policy/privacy-policies/github-general-privacy-statement)).
 
 ## Lizenz
 
