@@ -137,4 +137,6 @@ jobs:
             --title "ReVideo $VERSION" \
             --notes "ReVideo $VERSION
 
+          Quellcode dieser Version: https://github.com/$GITHUB_REPOSITORY/tree/$GITHUB_SHA
+
           Die *-sources.tar enthalten den Quellcode der mitgelieferten Open-Source-Komponenten (ffmpeg, mpv, Qt u. a.)."
