@@ -14,7 +14,7 @@
 #include <QNetworkReply>
 #include <QProcess>
 
-/// Public repo holding only the release files; the source repo stays private.
+/// Repo holding the release files the app updates from.
 static const char LATEST[] = "https://api.github.com/repos/Lussuv/ReVideo-releases/releases/latest";
 
 static QNetworkRequest request(const QUrl &url)

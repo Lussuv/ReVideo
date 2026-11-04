@@ -86,6 +86,7 @@ if(LINUX)
     install(FILES packaging/linux/de.retrydev.ReVideo.metainfo.xml DESTINATION share/metainfo)
     install(FILES assets/icon.png DESTINATION share/icons/hicolor/512x512/apps RENAME de.retrydev.ReVideo.png)
     install(FILES assets/icon-128.png DESTINATION share/icons/hicolor/128x128/apps RENAME de.retrydev.ReVideo.png)
+    install(FILES LICENSE DESTINATION share/licenses/de.retrydev.ReVideo)
 endif()
 
 enable_testing()

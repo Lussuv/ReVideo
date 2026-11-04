@@ -15,3 +15,7 @@ __pycache__/
 
 /.qtcreator/
 CMakeLists.txt.user
+
+# lokale Notizen und Editor-Artefakte
+/ENTWICKLUNG.md
+/target/

@@ -26,6 +26,7 @@ windeployqt6 --release --qmldir src/qml --no-translations --no-system-d3d-compil
 w() { cygpath -w "$1"; }
 python -I scripts/stage-windows.py "$(w "$STAGE")" "$(w "$LGPL/bin")" "$(w /ucrt64/bin)" \
     --msys-root "$(w /)" \
+    --license "ReVideo (GPL-3.0)=$(w "$PWD/LICENSE")" \
     --license "ffmpeg (LGPL, DLLs)=$(w "$LGPL/licenses/ffmpeg/COPYING.LGPLv2.1")" \
     --license "ffmpeg (GPL, ffmpeg.exe)=$(w "$EXPORT/licenses/ffmpeg/COPYING.GPLv2")" \
     --license "mpv (LGPL)=$(w "$LGPL/licenses/mpv/LICENSE.LGPL")" \
